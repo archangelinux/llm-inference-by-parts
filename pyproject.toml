@@ -1,0 +1,6 @@
+[project]
+name = "llm-inference"
+version = "0.1"
+
+[tool.setuptools]
+packages = ["engine"]
