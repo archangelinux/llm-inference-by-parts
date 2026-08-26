@@ -62,8 +62,18 @@ class CausalSelfAttention(nn.Module):
         return self.c_proj(y)
 
 
-#class MLP(nn.Module):
+#feed forward = FFN = multi layer perceptron; need time to “think” about the gathered data before calculating the logits
+class MLP(nn.Module): 
+    def __init__(self, config):
+        super().__init__()
+        # *4 lets the layer compute richer per-token functions than it could at native width
+        self.c_fc = nn.Linear(in_features= config.n_embd, out_features = config.n_embd * 4, bias = config.bias) #convolution, fully-connected 
+        self.c_proj = nn.Linear(in_features= config.n_embd * 4, out_features = config.n_embd, bias = config.bias)
+        self.gelu = nn.GELU(approximate = "tanh") #fast approx, GPT2
 
+    def forward(self, x):
+        x = self.c_proj(self.gelu(self.c_fc(x)))
+        return x
 
 #class Block(nn.Module):
 
@@ -75,8 +85,9 @@ class CausalSelfAttention(nn.Module):
 if __name__ == "__main__":
     cfg = GPTConfig()
     ids = torch.randint(0, cfg.vocab_size, (2, 8), device=DEVICE)
-    emb = Embedding(cfg).to(DEVICE)
-    x = emb(ids)
-    print("embedding:", x.shape) # want (2, 8, 768)
-    attn = CausalSelfAttention(cfg).to(DEVICE)
-    print("attention:", attn(x).shape)  # want (2, 8, 768)
+    x = Embedding(cfg).to(DEVICE)(ids)
+    print("embedding:", x.shape)
+    x = CausalSelfAttention(cfg).to(DEVICE)(x)
+    print("attention:", x.shape)
+    x = MLP(cfg).to(DEVICE)(x)
+    print("mlp:", x.shape)
