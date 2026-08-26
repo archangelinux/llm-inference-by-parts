@@ -75,8 +75,18 @@ class MLP(nn.Module):
         x = self.c_proj(self.gelu(self.c_fc(x)))
         return x
 
-#class Block(nn.Module):
+class Block(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.ln_1 = nn.LayerNorm(config.n_embd)
+        self.ln_2 = nn.LayerNorm(config.n_embd)
+        self.attn = CausalSelfAttention(config)
+        self.mlp = MLP(config)
 
+    def forward(self, x):
+        x = x + self.attn(self.ln_1(x)) #add to input --> residual/skip connection
+        x = x + self.mlp(self.ln_2(x))
+        return x
 
 #class GPT(nn.Module):
 
@@ -91,3 +101,5 @@ if __name__ == "__main__":
     print("attention:", x.shape)
     x = MLP(cfg).to(DEVICE)(x)
     print("mlp:", x.shape)
+    x = Block(cfg).to(DEVICE)(x)
+    print("block: ", x.shape)
