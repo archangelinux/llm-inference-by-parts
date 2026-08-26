@@ -88,8 +88,24 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln_2(x))
         return x
 
-#class GPT(nn.Module):
+class GPT(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.transformer = nn.ModuleDict(dict(
+            embd = Embedding(config),
+            h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]), #hidden blocks
+            ln_f = nn.LayerNorm(config.n_embd) #final
+        )
+        )
+        self.lm_head = nn.Linear(in_features = config.n_embd, out_features = config.vocab_size, bias = False)
+        self.lm_head.weight = self.transformer.embd.wte.weight
 
+    def forward(self, ids):
+        x = self.transformer.embd(ids)
+        for block in self.transformer.h:
+            x = block(x)
+        x = self.lm_head(self.transformer.ln_f(x))
+        return x
 
 
 if __name__ == "__main__":
@@ -103,3 +119,5 @@ if __name__ == "__main__":
     print("mlp:", x.shape)
     x = Block(cfg).to(DEVICE)(x)
     print("block: ", x.shape)
+    x = GPT(cfg).to(DEVICE)(ids)
+    print("gpt:", x.shape)
