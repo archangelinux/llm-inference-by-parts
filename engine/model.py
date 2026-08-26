@@ -61,7 +61,6 @@ class CausalSelfAttention(nn.Module):
 
         return self.c_proj(y)
 
-
 #feed forward = FFN = multi layer perceptron; need time to “think” about the gathered data before calculating the logits
 class MLP(nn.Module): 
     def __init__(self, config):
@@ -92,7 +91,7 @@ class GPT(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.transformer = nn.ModuleDict(dict(
-            embd = Embedding(config),
+            embd = Embedding(config), #could get rid of this module and merge in to match HF naming 
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]), #hidden blocks
             ln_f = nn.LayerNorm(config.n_embd) #final
         )
@@ -106,7 +105,6 @@ class GPT(nn.Module):
             x = block(x)
         x = self.lm_head(self.transformer.ln_f(x))
         return x
-
 
 if __name__ == "__main__":
     cfg = GPTConfig()
