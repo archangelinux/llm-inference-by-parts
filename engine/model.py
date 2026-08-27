@@ -5,6 +5,8 @@ import math
 
 from engine.config import DEVICE, GPTConfig
 
+from transformers import GPT2LMHeadModel, GPT2Tokenizer 
+
 class Embedding(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -106,6 +108,58 @@ class GPT(nn.Module):
         x = self.lm_head(self.transformer.ln_f(x))
         return x
 
+    @classmethod
+    def from_pretrained(cls, config):
+        model = cls(config)
+        sd = model.state_dict()
+        model_hf = GPT2LMHeadModel.from_pretrained('gpt2')
+        sd_hf = model_hf.state_dict()
+        transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
+
+        with torch.no_grad():
+            for k in sd_hf.keys():
+                if k in ("transformer.wte.weight", "transformer.wpe.weight"):
+                    my_k = "transformer.embd." + k.removeprefix("transformer.")
+                else:
+                    my_k = k
+
+                if any(k.endswith(w) for w in transposed):
+                    # Conv1D weights to transpose for Linear
+                    assert sd_hf[k].shape[::-1] == sd[my_k].shape
+                    sd[my_k].copy_(sd_hf[k].t())
+                else:
+                    assert sd_hf[k].shape == sd[my_k].shape
+                    sd[my_k].copy_(sd_hf[k])
+
+        print(f"loaded {len(sd_hf)} tensors")
+        return model
+
+    @torch.no_grad()
+    def generate(self, ids, max_new_tokens, temperature=1.0, top_k=None):
+
+        for _ in range(max_new_tokens):
+            # if the sequence context is growing too long we must crop it at block_size
+            idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
+            # forward the model to get the logits for the index in the sequence
+            logits, _ = self(idx_cond)
+            # pluck the logits at the final step and scale by desired temperature
+            logits = logits[:, -1, :] / temperature
+            # optionally crop the logits to only the top k options
+            if top_k is not None:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = -float('Inf')
+            # apply softmax to convert logits to (normalized) probabilities
+            probs = F.softmax(logits, dim=-1)
+            # sample from the distribution
+            idx_next = torch.multinomial(probs, num_samples=1)
+            # append sampled index to the running sequence and continue
+            idx = torch.cat((idx, idx_next), dim=1)
+
+        return idx
+
+
+
+
 if __name__ == "__main__":
     cfg = GPTConfig()
     ids = torch.randint(0, cfg.vocab_size, (2, 8), device=DEVICE)
@@ -119,3 +173,14 @@ if __name__ == "__main__":
     print("block: ", x.shape)
     x = GPT(cfg).to(DEVICE)(ids)
     print("gpt:", x.shape)
+
+
+    tok = GPT2Tokenizer.from_pretrained("gpt2")
+    model = GPT.from_pretrained(GPTConfig()).to(DEVICE).eval()
+    ids = tok("The meaning of life is", return_tensors="pt").input_ids.to(DEVICE)
+    with torch.inference_mode():
+        for _ in range(20):
+            logits = model(ids)
+            next_id = logits[:, -1, :].argmax(dim=-1, keepdim=True)
+            ids = torch.cat([ids, next_id], dim=1)
+    print(tok.decode(ids[0]))
