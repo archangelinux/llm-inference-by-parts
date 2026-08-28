@@ -10,7 +10,6 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer
 class Embedding(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.config = config
         self.wte = nn.Embedding(config.vocab_size, config.n_embd) #token embeddings
         self.wpe = nn.Embedding(config.block_size, config.n_embd) #positional embeddings
 
@@ -46,11 +45,11 @@ class CausalSelfAttention(nn.Module):
         self.register_buffer("tril_mask", torch.tril(torch.ones(config.block_size, config.block_size))
                                 .view(1, 1, config.block_size, config.block_size))
 
-    def forward(self, x):
-        b, t, c = x.shape
-        head_size = c // self.n_head
+    def forward(self, x, kv_cache = None): #kv_cache: (k_past, v_past) 
+        b, t, c = x.shape #(b, t, n_embd)
+        head_size = c // self.n_head # n_embd//n_head
         q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
-        k = k.view(b, t, self.n_head, head_size).transpose(1, 2) 
+        k = k.view(b, t, self.n_head, head_size).transpose(1, 2) #unpacks into seperate heads, transpose to move heads up from to process all heads in parallel as seperate batch elements
         q = q.view(b, t, self.n_head, head_size).transpose(1, 2) 
         v = v.view(b, t, self.n_head, head_size).transpose(1, 2) 
 
@@ -100,6 +99,7 @@ class GPT(nn.Module):
         )
         self.lm_head = nn.Linear(in_features = config.n_embd, out_features = config.vocab_size, bias = False)
         self.lm_head.weight = self.transformer.embd.wte.weight
+        self.config = config
 
     def forward(self, ids):
         x = self.transformer.embd(ids)
@@ -134,38 +134,42 @@ class GPT(nn.Module):
         print(f"loaded {len(sd_hf)} tensors")
         return model
 
-    @torch.no_grad()
-    def generate(self, ids, max_new_tokens, temperature=1.0, top_k=None):
-
+    @torch.no_grad() # inference only -> don't build the autograd graph (faster, less memory)
+    def generate(self, ids, max_new_tokens, do_sample=False, temperature=1.0, top_k=None):
+        """Autoregressive decoding: predict one token, append it, repeat.
+        ids: (b, t) prompt token ids -> returns (b, t + max_new_tokens)."""
         for _ in range(max_new_tokens):
-            # if the sequence context is growing too long we must crop it at block_size
-            idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
-            # forward the model to get the logits for the index in the sequence
-            logits, _ = self(idx_cond)
-            # pluck the logits at the final step and scale by desired temperature
-            logits = logits[:, -1, :] / temperature
-            # optionally crop the logits to only the top k options
-            if top_k is not None:
-                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < v[:, [-1]]] = -float('Inf')
-            # apply softmax to convert logits to (normalized) probabilities
-            probs = F.softmax(logits, dim=-1)
-            # sample from the distribution
-            idx_next = torch.multinomial(probs, num_samples=1)
-            # append sampled index to the running sequence and continue
-            idx = torch.cat((idx, idx_next), dim=1)
+            # crop context to the last block_size tokens (wpe dimensions); a longer sequence would index past the embedding table and crash
+            ids_cond = ids if ids.size(1) <= self.config.block_size else ids[:, -self.config.block_size:]
+            logits = self(ids_cond) # (b, t, vocab_size): a score for "what comes next" at every position
+            # we only want the prediction after the last token; temperature rescales confidence: <1 exaggerates the gap between high and low scores, >1 shrinks it (1.0 = untouched)
+            logits = logits[:, -1, :] / temperature # (b, vocab_size)
+            if not do_sample:
+                # greedy: always take the single highest-scoring token. deterministic,
+                # same output every run -- what the tests/fixtures rely on
+                next_id = logits.argmax(dim=-1, keepdim=True) # (b, 1)
+            else:
+                # sampling: pick the next token at random, weighted by the model's confidence
+                if top_k is not None:
+                    # keep only the k best-scoring tokens: find the kth-best score per row, set everything below it to -inf (-> probability 0 after softmax), random draw can never land on a garbage tail token
+                    v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                    logits[logits < v[:, [-1]]] = -float('Inf')
+                # softmax turns raw scores into probabilities (all positive, sum to 1)
+                probs = funct.softmax(logits, dim=-1)
+                # multinomial = weighted dice roll: token with prob 0.3 is drawn 30% of the time
+                next_id = torch.multinomial(probs, num_samples=1) # (b, 1)
+            ids = torch.cat((ids, next_id), dim=1) # append -> next iteration sees it as context
 
-        return idx
-
+        return ids
 
 
 
 if __name__ == "__main__":
     cfg = GPTConfig()
-    ids = torch.randint(0, cfg.vocab_size, (2, 8), device=DEVICE)
-    x = Embedding(cfg).to(DEVICE)(ids)
+    ids = torch.randint(0, cfg.vocab_size, (2, 8), device=DEVICE) # (b, t) = (2, 8) simulated
+    x = Embedding(cfg).to(DEVICE)(ids) # (b, t, n_embd)
     print("embedding:", x.shape)
-    x = CausalSelfAttention(cfg).to(DEVICE)(x)
+    x = CausalSelfAttention(cfg).to(DEVICE)(x) # (b, t, n_embd)
     print("attention:", x.shape)
     x = MLP(cfg).to(DEVICE)(x)
     print("mlp:", x.shape)
@@ -177,10 +181,5 @@ if __name__ == "__main__":
 
     tok = GPT2Tokenizer.from_pretrained("gpt2")
     model = GPT.from_pretrained(GPTConfig()).to(DEVICE).eval()
-    ids = tok("The meaning of life is", return_tensors="pt").input_ids.to(DEVICE)
-    with torch.inference_mode():
-        for _ in range(20):
-            logits = model(ids)
-            next_id = logits[:, -1, :].argmax(dim=-1, keepdim=True)
-            ids = torch.cat([ids, next_id], dim=1)
-    print(tok.decode(ids[0]))
+    ids = tok("The meaning of life is", return_tensors="pt").input_ids.to(DEVICE) #(b, t) = (1, 5); or t the sequence length is the number of subword tokens. b is batch size = number of input strings
+    print(tok.decode(model.generate(ids, max_new_tokens=20)[0]))

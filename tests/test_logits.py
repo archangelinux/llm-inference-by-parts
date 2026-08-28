@@ -35,11 +35,8 @@ def test_logits(): #check if one forward pass produces the same values as HF
 def test_greedy():
     for prompt, expected in GENERATIONS.items(): #gives both the prompt and HFs expected output string
         ids = tok(prompt, return_tensors="pt").input_ids.to(DEVICE) #tokenize
-        with torch.inference_mode():
-            for _ in range(50): #first 50 tokens greedy matching, no kv-cache yet
-                next_id = model(ids)[:, -1, :].argmax(dim=-1, keepdim=True) #keeps it shaped (1,1) for concatenation
-                ids = torch.cat([ids, next_id], dim=1)
-        assert tok.decode(ids[0]) == expected #decode and compare
+        out = model.generate(ids, max_new_tokens=50) #greedy by default (do_sample=False)
+        assert tok.decode(out[0]) == expected #decode and compare
     print("greedy: all match")
 
 
