@@ -12,7 +12,7 @@ from engine.config import DEVICE, GPTConfig
 from engine.model import GPT
 
 TESTS_DIR = Path(__file__).parent
-with open(TESTS_DIR / "fixture_generations.json") as f: #writte by make_fixtures.py
+with open(TESTS_DIR / "fixture_generations.json") as f: #written by make_fixtures.py
     GENERATIONS = json.load(f)
 
 tok = GPT2Tokenizer.from_pretrained("gpt2")
@@ -23,7 +23,8 @@ def test_logits(): #check if one forward pass produces the same values as HF
         ref = torch.load(TESTS_DIR / f"fixture_logits_{i}.pt", map_location="cpu")
         ids = tok(prompt, return_tensors="pt").input_ids.to(DEVICE) # to mps (input and model must be on same device)
         with torch.inference_mode():
-            mine = model(ids).cpu() #back to cpu so it can be subtracted from ref
+            logits, kv = model(ids) # no cache passed => kv = [None]*n_layer
+            mine = logits.cpu() #back to cpu so it can be subtracted from ref
         if i == 1:
             print(f"shapes: mine {tuple(mine.shape)}  ref {tuple(ref.shape)}  ({mine.dtype}, {DEVICE})")
         err = (mine - ref).abs().max().item() # elementwise difference -> abs val -> biggest single element -> .item() converts the 0-dim tensor to a plain Python float

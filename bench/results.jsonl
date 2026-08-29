@@ -1,0 +1,6 @@
+{"device": "mps", "n_new": 50, "label": "naive", "prompt_len": 16, "tok_per_sec": [40.65, 52.95, 45.36]}
+{"device": "mps", "n_new": 50, "label": "naive", "prompt_len": 128, "tok_per_sec": [17.21, 23.62, 21.95]}
+{"device": "mps", "n_new": 50, "label": "naive", "prompt_len": 512, "tok_per_sec": [1.36, 0.95, 0.74]}
+{"device": "mps", "n_new": 50, "label": "cached", "prompt_len": 16, "tok_per_sec": [45.23, 49.8, 49.83]}
+{"device": "mps", "n_new": 50, "label": "cached", "prompt_len": 128, "tok_per_sec": [24.81, 46.71, 47.36]}
+{"device": "mps", "n_new": 50, "label": "cached", "prompt_len": 512, "tok_per_sec": [38.12, 42.49, 33.26]}
