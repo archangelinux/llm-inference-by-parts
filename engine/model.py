@@ -2,11 +2,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as funct
 import math
-
 from engine.config import DEVICE, GPTConfig
-
 from transformers import GPT2LMHeadModel, GPT2Tokenizer 
-
 
 class Embedding(nn.Module):
     def __init__(self, config):
@@ -14,20 +11,24 @@ class Embedding(nn.Module):
         self.wte = nn.Embedding(config.vocab_size, config.n_embd) #token embeddings
         self.wpe = nn.Embedding(config.block_size, config.n_embd) #positional embeddings
 
-    def forward(self, ids, past_length = 0): #ids from HF tokenizer
+    def forward(self, ids, past_length = 0, pos_ids = None): #ids from HF tokenizer, pos_ids (b, t) dtype long are per-slot wpe row numbers for batching
         device = ids.device
-        b, t = ids.shape
-        pos = torch.arange(past_length, past_length+t, dtype=torch.long, device=device) # row numbers, shape t
+        t = ids.shape[1]
         tok_emb = self.wte(ids) # (b, t, n_embd)
         # e.g. tensor of shape (1, 3, 768):
         # [[ [row 15496's 768 floats],
         #    [row 16432's 768 floats],
         #    [row   995's 768 floats] ]]
-        pos_emb = self.wpe(pos) # (t, n_embd); shared across batches of same t, content independent, learned for GPT2 (doesnt have to be learned)
+        if pos_ids is None:
+            pos = torch.arange(past_length, past_length+t, dtype=torch.long, device=device) # row numbers, shape t, t is the 
+            pos_emb = self.wpe(pos) # (t, n_embd); shared across batches of same t, content independent, learned for GPT2 (doesnt have to be learned)
         # e.g. tensor of shape (3, 768):
         # [ [row 0's 768 floats],
         #   [row 1's 768 floats],
         #   [row 2's 768 floats] ]
+        else:
+            pos_emb = self.wpe(pos_ids)
+
         return tok_emb + pos_emb
 
 class CausalSelfAttention(nn.Module):
@@ -46,7 +47,9 @@ class CausalSelfAttention(nn.Module):
         self.register_buffer("tril_mask", torch.tril(torch.ones(config.block_size, config.block_size))
                                 .view(1, 1, config.block_size, config.block_size))
 
-    def forward(self, x, kv_cache = None): #kv_cache: (k_past, v_past, past_len) - full-size buffers preallocated by generate(); only the first past_len positions are used
+    #kv_cache: (k_past, v_past, past_len) - full-size buffers preallocated by generate(); only the first past_len positions are used
+    #attn_mask: (b, total_t) 
+    def forward(self, x, kv_cache = None, attn_mask = None): 
         b, t, c = x.shape #(b, t, n_embd)
         head_size = c // self.n_head # n_embd//n_head
         q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
@@ -63,7 +66,7 @@ class CausalSelfAttention(nn.Module):
         #     v = torch.concat((v_past, v), dim=-2)
         # new_kv_cache = (k, v)
 
-        #v2 preallocated: k_past is always max_len long - past tokens + empty slots - so past_len (not .size()) 
+        #v2 preallocated: k_past is always max_len long - past tokens + empty slots - so past_len (not .shape) 
         if kv_cache is not None:
             k_past, v_past, past_len = kv_cache
             total = past_len + t
@@ -83,9 +86,15 @@ class CausalSelfAttention(nn.Module):
         #implementation from attention is all you need paper
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1))) #(b, nh, current_t, total_t)
         #att = att.masked_fill(self.tril_mask[:,:,:t,:t] == 0, float('-inf')) #for decoder arch
+        
+        if attn_mask is not None:
+            #apply no-attention to the mask for batching
+            # the Nones without the colon is the same thing as .unsqueeze(1).unsqueeze(1) to add dimensions of 1 at position 1 to line up with nh, current_t dimensions in att
+            att = att.masked_fill(attn_mask[:, None, None, :] == 0, -1e9) #not -inf to avoid padding all -inf --> softmax to NaN
 
-        att = att.masked_fill(self.tril_mask[:, :, total_t - current_t : total_t, :total_t] == 0, float('-inf'))
+        att = att.masked_fill(self.tril_mask[:, :, total_t - current_t : total_t, :total_t] == 0, float('-inf')) 
         att = funct.softmax(att, dim=-1)
+
         y = att @ v # (b, n_head, t, t) x (b, n_head, t, head_size) -> (b, n_head, t, head_size)
         y = y.transpose(1, 2).contiguous().view(b, current_t, c) #re-assemble all head outputs side by side
 
@@ -112,8 +121,8 @@ class Block(nn.Module):
         self.attn = CausalSelfAttention(config)
         self.mlp = MLP(config)
 
-    def forward(self, x, kv_cache= None):
-        attn_out, next_kv_cache = self.attn(self.ln_1(x), kv_cache=kv_cache) 
+    def forward(self, x, kv_cache= None, attn_mask = None):
+        attn_out, next_kv_cache = self.attn(self.ln_1(x), kv_cache=kv_cache, attn_mask = attn_mask) 
         x = x + attn_out #add to input --> residual/skip connection
         x = x + self.mlp(self.ln_2(x)) 
         return x, next_kv_cache
@@ -131,17 +140,28 @@ class GPT(nn.Module):
         self.lm_head.weight = self.transformer.embd.wte.weight
         self.config = config
 
-    def forward(self, ids, kv_past=None):
+    def forward(self, ids, kv_past=None, attn_mask=None):
         if kv_past is not None:
             past_length = kv_past[0][2]  # layer 0's past_len counter:
         else:
             past_length = 0
-        x = self.transformer.embd(ids, past_length=past_length)
+
+
+        # build pos_ids left-padding for batching
+        if attn_mask is None:
+            x = self.transformer.embd(ids, past_length=past_length, pos_ids = None)
+        else:
+            #slot position = number of 1s strictly to its left in its row of the attn_mask
+            #inclusive cumulative sum , minus 1 and clamp negative to get exclusive
+            pos_ids = (torch.cumsum(attn_mask, dim=-1) - 1).clamp(min=0) # (b, total_t)
+            pos_ids = pos_ids[:, -ids.size(1):]  # keep last t columns: mask covers cache+input, embd only embeds input
+            x = self.transformer.embd(ids, past_length=past_length, pos_ids=pos_ids)
+
 
         new_kv = [] #per layer cache tensors
         for i, block in enumerate(self.transformer.h):
             layer_past = kv_past[i] if kv_past is not None else None
-            x, layer_cache = block(x, kv_cache=layer_past)
+            x, layer_cache = block(x, kv_cache=layer_past, attn_mask=attn_mask)
             new_kv.append(layer_cache)
         x = self.lm_head(self.transformer.ln_f(x))
         return x, new_kv
@@ -176,12 +196,12 @@ class GPT(nn.Module):
     def generate(self, ids, max_new_tokens, do_sample=False, temperature=1.0, top_k=None):
         """Autoregressive decoding: predict one token, append it, repeat.
         ids: (b, t) prompt token ids -> returns (b, t + max_new_tokens)."""
-        b = ids.size(0)
+        b = ids.shape[0]
         head_size = self.config.n_embd // self.config.n_head
         w = self.lm_head.weight #any weight works here, just borrowing its device/dtype precision for the buffers
         # preallocation: one (b, nh, max_len, hs) K buffer + V buffer per layer
         # written into slice-by-slice each step. max_len = the most positions we could ever hold: prompt + new tokens, capped at block_size (the model can't attend past that)
-        max_len = min(ids.size(1) + max_new_tokens, self.config.block_size)
+        max_len = min(ids.shape[1] + max_new_tokens, self.config.block_size)
         kv_cache = [
             (torch.empty(b, self.config.n_head, max_len, head_size, device=w.device, dtype=w.dtype),
              torch.empty(b, self.config.n_head, max_len, head_size, device=w.device, dtype=w.dtype),
@@ -228,6 +248,45 @@ class GPT(nn.Module):
             ids = torch.cat((ids, next_id), dim=1) # append -> next iteration sees it as context
 
         return ids
+
+    @torch.no_grad()
+    def generate_batch(self, all_ids, max_new_tokens): #all_ids is a python list of b tensors
+        PAD_TOKEN = 0
+        t_max = max(ids.shape[1] for ids in all_ids)
+        b = len(all_ids)
+        head_size = self.config.n_embd // self.config.n_head
+        w = self.lm_head.weight
+
+        # preset to all pads
+        ids  = torch.full((b, t_max), PAD_TOKEN, dtype=torch.long, device=w.device) 
+        mask = torch.zeros((b, t_max), dtype=torch.long, device=w.device) 
+
+        for i, seq in enumerate(all_ids):
+            ids[i, -seq.shape[1]:] = seq[0] #overwrite the right end of row i with real ids
+            mask[i, -seq.shape[1]:] = 1 #mark those slots as used
+
+        max_len = max_new_tokens + t_max
+        assert(max_len <= self.config.block_size)
+
+        kv_cache = [
+            (torch.empty(b, self.config.n_head, max_len, head_size, device=w.device, dtype=w.dtype),
+            torch.empty(b, self.config.n_head, max_len, head_size, device=w.device, dtype=w.dtype),
+                0) for _ in range(self.config.n_layer)
+        ]
+
+        #prefill
+        logits, kv_cache = self(ids, kv_past=kv_cache, attn_mask=mask) #forward
+
+        for i in range(max_new_tokens):
+            logits = logits[:, -1, :] 
+            next_id = logits.argmax(dim=-1, keepdim=True) # (b, 1)
+            ids = torch.cat((ids, next_id), dim=1)
+            mask = torch.cat((mask, torch.ones((b, 1), dtype=torch.long, device=w.device)), dim = 1)
+            if i < max_new_tokens - 1: #final forward is never read
+                logits, kv_cache = self(next_id, kv_past=kv_cache, attn_mask=mask)
+
+        return ids #(b, t_max + max_new_tokens)
+
 
 
 if __name__ == "__main__":
