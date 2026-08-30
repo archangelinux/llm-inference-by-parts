@@ -3,7 +3,9 @@ import torch.nn as nn
 from torch.nn import functional as funct
 import math
 from engine.config import DEVICE, GPTConfig
-from transformers import GPT2LMHeadModel, GPT2Tokenizer 
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+
+PAD_TOKEN = 0 #filler id for pad slots; arbitrary (mask makes it weightless), module-level so tests can import it
 
 class Embedding(nn.Module):
     def __init__(self, config):
@@ -250,8 +252,7 @@ class GPT(nn.Module):
         return ids
 
     @torch.no_grad()
-    def generate_batch(self, all_ids, max_new_tokens): #all_ids is a python list of b tensors
-        PAD_TOKEN = 0
+    def generate_batch(self, all_ids, max_new_tokens, eos_id=None): #all_ids is a python list of b tensors
         t_max = max(ids.shape[1] for ids in all_ids)
         b = len(all_ids)
         head_size = self.config.n_embd // self.config.n_head
@@ -276,15 +277,22 @@ class GPT(nn.Module):
 
         #prefill
         logits, kv_cache = self(ids, kv_past=kv_cache, attn_mask=mask) #forward
+        completed = torch.zeros(b, dtype = torch.bool, device=w.device) #track which sequences have been completed
 
         for i in range(max_new_tokens):
             logits = logits[:, -1, :] 
             next_id = logits.argmax(dim=-1, keepdim=True) # (b, 1)
+            if eos_id is not None:
+                next_id[completed] = PAD_TOKEN #bool tensor indexing, sets position with True in completed to the pad
+                completed = completed.masked_fill(next_id.squeeze(1) == eos_id , True) #like a "stop generating stuff" switch takes effect next iteration
             ids = torch.cat((ids, next_id), dim=1)
             mask = torch.cat((mask, torch.ones((b, 1), dtype=torch.long, device=w.device)), dim = 1)
             if i < max_new_tokens - 1: #final forward is never read
                 logits, kv_cache = self(next_id, kv_past=kv_cache, attn_mask=mask)
-
+            if completed.all(): 
+                missing = (t_max + max_new_tokens) - ids.size(1) 
+                ids = funct.pad(ids, (0, missing), value=PAD_TOKEN)
+                break
         return ids #(b, t_max + max_new_tokens)
 
 

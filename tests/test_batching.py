@@ -79,6 +79,42 @@ def test_prefill_logits_match_solo():
         assert err < 1e-3, f"prompt {i} {p[:40]!r}: prefill logits diverge (err {err:.2e}) => bug is in mask/positions/padding"
     print("prefill: all match")
 
+#staggered-EOS gate: rows must stop at different steps without disturbing each other.
+#greedy gpt2 never emits the real eos (50256) in 50 tokens, so borrow "." (13) as the stop
+#token purely to exercise the machinery; two prompts never emit it -> "absent" branch covered.
+#expected is computable from the solo baseline: greedy is deterministic, so a correct row
+#matches solo's picks up to and including its first eos, then pads to full width.
+def test_batched_eos():
+    from engine.model import PAD_TOKEN
+    EOS = 13  # "."
+    solo = solo_baselines()
+    all_ids = [tok(p, return_tensors="pt").input_ids.to(DEVICE) for p in prompts]
+    batched = model.generate_batch(all_ids, max_new_tokens=N_NEW, eos_id=EOS)
+    for i, p in enumerate(prompts):
+        solo_gen = solo[i][0, -N_NEW:].cpu()
+        hits = (solo_gen == EOS).nonzero()
+        if len(hits) == 0:
+            expected = solo_gen  # never finishes: all 50 must match, no pads
+            finish = "-"
+        else:
+            j = hits[0].item()  # first eos position; row keeps it, then pads out
+            expected = torch.cat((solo_gen[:j + 1],
+                                  torch.full((N_NEW - j - 1,), PAD_TOKEN, dtype=solo_gen.dtype)))
+            finish = j
+        batch_gen = batched[i, -N_NEW:].cpu()
+        print(f"[{i}] {p[:40]!r:42s} finishes at step {finish}")
+        if not torch.equal(batch_gen, expected):
+            step = (batch_gen != expected).nonzero()[0].item()
+            raise AssertionError(
+                f"prompt {i} {p[:40]!r} diverged at generated step {step}: "
+                f"got {batch_gen[step].item()}, expected {expected[step].item()} (eos at {finish})\n"
+                f"  batched:  {batch_gen.tolist()}\n"
+                f"  expected: {expected.tolist()}"
+            )
+    print("eos: all match")
+
+
 if __name__ == "__main__":
     test_batched_matches_solo()
     test_prefill_logits_match_solo()
+    test_batched_eos()
