@@ -76,7 +76,7 @@ class Engine:
         request.output_ids.append(pick.item()) #not the full tensor with device and stuff
         self.running[slot] = request
         #detect eos or budget
-        if self.next_id[slot] == request.eos_id or len(request.output_ids) == request.prompt_ids.shape[1] + request.max_new_tokens:
+        if self.next_id[slot] == request.eos_id or len(request.output_ids) >= request.max_new_tokens:
             request.done = True
 
     def step(self) -> None:
