@@ -1,0 +1,1 @@
+fast api Startup event launches run() as a background task. One endpoint, POST /generate: tokenize, build a Request, put it on the inbox, then return an EventSourceResponse that awaits the request's out_queue, decodes each token, and yields it — until the done sentinel. Stream tokens, don't buffer; that's what makes TTFT measurable.

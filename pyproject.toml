@@ -2,5 +2,14 @@
 name = "llm-inference"
 version = "0.1"
 
+dependencies = [
+    "torch==2.8.0",
+    "transformers==4.56.2",
+    "fastapi",
+    "uvicorn",
+    "sse-starlette",
+    "httpx",
+]
+
 [tool.setuptools]
 packages = ["engine"]
