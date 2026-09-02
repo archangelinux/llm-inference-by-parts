@@ -1,0 +1,8 @@
+{"device": "mps", "n_slots": 3, "n_new": 50, "prompt": "Hello", "static_s": 1.3823993750847876, "continuous_s": 1.1542057080660015}
+{"device": "mps", "n_slots": 3, "n_new": 50, "prompt": "The meaning of life is", "static_s": 1.3823993750847876, "continuous_s": 0.8564435830339789}
+{"device": "mps", "n_slots": 3, "n_new": 50, "prompt": "In 2019, OpenAI released a language mode", "static_s": 1.3823993750847876, "continuous_s": 1.3790881661698222}
+{"device": "mps", "n_slots": 3, "n_new": 50, "prompt": "def fibonacci(n):", "static_s": 5.659472458064556, "continuous_s": 4.872825457947329}
+{"device": "mps", "n_slots": 3, "n_new": 50, "prompt": "1, 1, 2, 3, 5, 8, 13,", "static_s": 5.659472458064556, "continuous_s": 7.4116448340937495}
+{"device": "mps", "n_slots": 3, "n_new": 50, "prompt": "Q: What is the capital of France?\nA: Par", "static_s": 5.659472458064556, "continuous_s": 2.088239250006154}
+{"device": "mps", "n_slots": 3, "n_new": 50, "prompt": "The quick brown fox jumps over the lazy ", "static_s": 6.485804249998182, "continuous_s": 2.5331187911797315}
+{"device": "mps", "n_slots": 3, "n_new": 50, "prompt": "Alice gave the book to Bob because he ha", "static_s": 6.485804249998182, "continuous_s": 2.698543082922697}

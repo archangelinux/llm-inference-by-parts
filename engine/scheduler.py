@@ -4,6 +4,7 @@ import torch
 from collections import deque 
 from dataclasses import dataclass, field # for the Request class
 from engine.model import PAD_TOKEN, GPT, GPTConfig, DEVICE
+from uuid import uuid4
 
 #postcodition of the whole system: when done=True and output_ids holds the same as what solo greedy generation would have produced, up to and including EOS or budget length (max_new_tokens)
 @dataclass
@@ -13,6 +14,9 @@ class Request:
     eos_id : int | None = None
     output_ids: list = field(default_factory=list)
     done: bool = False
+    cancelled: bool = False #for when a client disconnects or times out
+    req_id: str = field(default_factory=lambda: uuid4().hex)
+
 
 class Engine:
 
@@ -40,12 +44,14 @@ class Engine:
         self.mask = torch.zeros((n_slots, max_len), dtype=torch.long, device=w.device) 
         self.next_id = torch.full((n_slots, 1), PAD_TOKEN, dtype=torch.long, device=w.device) #hold one token each slot will feed the model next
 
+        self.step_events = [] #for processed logits to be appended and returned by step() for streaming
+
     def submit(self, request) -> None:
         self.waiting.append(request)
 
     def _evict(self) -> None:
         for slot, request in enumerate(self.running):
-            if request is not None and request.done:
+            if request is not None and (request.done or request.cancelled):
                 self.completed.append(request)
                 self.running[slot] = None
                 self.next_id[slot] = PAD_TOKEN
@@ -72,28 +78,32 @@ class Engine:
     #logit argmax selection + tokenization + recording to output + eos/budget detection atomically follows every model call (prefill + decode)
     def _intake(self, slot, logits, request):
         pick = logits[:, -1, :].argmax(dim=-1, keepdim=True)
+        token = pick.item()
         self.next_id[slot] = pick
-        request.output_ids.append(pick.item()) #not the full tensor with device and stuff
+        request.output_ids.append(token) #not the full tensor with device and stuff
         self.running[slot] = request
         #detect eos or budget
-        if self.next_id[slot] == request.eos_id or len(request.output_ids) >= request.max_new_tokens:
+        if token == request.eos_id or len(request.output_ids) >= request.max_new_tokens:
             request.done = True
+        self.step_events.append((request.req_id, token, request.done))
 
-    def step(self) -> None:
+    def step(self) -> list: #(req_id, token, done)
+        self.step_events = [] 
         self._evict()
         self._admit()
         #grow mask
         for slot, request in enumerate(self.running):
-            if request is not None:
+            if request is not None and not request.done:
                 self.mask[slot, self.frontier] = 1
 
         # single batch decode call
         step_cache = [(k,v,self.frontier) for (k, v) in self.kv_buffers] #all rows, counter = frontier
         logits, _ = self.model(self.next_id, kv_past=step_cache, attn_mask=self.mask[:, :self.frontier + 1])  #(n_slots, 1)
         for slot, request in enumerate(self.running):
-            if request is not None:
+            if request is not None and not request.done:
                 self._intake(slot, logits[slot:slot+1], request)
         self.frontier += 1
+        return self.step_events
         
     def run(self):
         while self.waiting or any(r is not None for r in self.running):
