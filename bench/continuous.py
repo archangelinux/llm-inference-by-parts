@@ -18,7 +18,7 @@ from pathlib import Path
 import torch
 from transformers import GPT2Tokenizer
 
-from engine.config import DEVICE, GPTConfig
+from engine.config import DEVICE, GPTConfig, sync
 from engine.model import GPT
 from engine.scheduler import Engine, Request
 
@@ -45,9 +45,6 @@ prompts = [
 ]
 all_ids = [tok(p, return_tensors="pt").input_ids.to(DEVICE) for p in prompts]
 
-def sync():
-    if DEVICE == "mps":
-        torch.mps.synchronize()
 
 def static_run():
     """FIFO groups of N_SLOTS through generate_batch; completion = when your group returns."""

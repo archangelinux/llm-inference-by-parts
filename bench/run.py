@@ -18,23 +18,20 @@ from pathlib import Path
 
 import torch
 
-from engine.config import DEVICE, GPTConfig
+from engine.config import DEVICE, GPTConfig, sync
 from engine.model import GPT
 
 PROMPT_LENGTHS = [16, 128, 512] #32 fold range in input size
 #actual work grows faster than 32x
 #MLP and projection layers are proportional to t (each token processed independently) bu attention compares every token against every earlier token so t^2
 N_NEW = 50 #new tokens per measurement, long enough to average out per-step jitter
-N_RUNS = 3 #repeats just long enough to spot variance
+N_RUNS = 5 #median of 5, clean protocol
 COOLDOWN_S = 60 #pause between mechanisms so a heavy one doesn't heat/throttle the GPU for the next
 
 RESULTS_FILE = Path(__file__).parent / "results.jsonl"
 
 model = GPT.from_pretrained(GPTConfig()).to(DEVICE).eval() #load the model once at module level, not timed; eval() is no op without batchnorm and dropout etc. since not training
 
-def sync():  #make sure GPU work is actually finished before reading the clock
-    if DEVICE == "mps":
-        torch.mps.synchronize()
 
 @torch.no_grad()
 def naive_generate(ids, n_new):
@@ -64,7 +61,8 @@ if __name__ == "__main__":
     prompt_ids = torch.full((1, max(PROMPT_LENGTHS)), 464, device=DEVICE)  # 464 = " The"
 
     for name in chosen:
-        PATHS[name](prompt_ids[:, :16], 5)  # warmup (first calls pay one-time compile/alloc cost)
+        for L in PROMPT_LENGTHS:
+            PATHS[name](prompt_ids[:, :L], 5)  # warmup EVERY (mechanism, length): mps compiles kernels per shape
 
     new_rows = {} #name -> its 3 records (one per prompt length)
     for j, name in enumerate(chosen): #one mechanism at a time -> records group as sets of 16/128/512

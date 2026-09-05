@@ -15,7 +15,7 @@ from pathlib import Path
 
 import torch
 
-from engine.config import DEVICE, GPTConfig
+from engine.config import DEVICE, GPTConfig, sync
 from engine.model import GPT
 
 BATCH_SIZES = [1, 2, 4, 8, 16, 32, 64, 128]
@@ -27,9 +27,6 @@ RESULTS_FILE = Path(__file__).parent / "batch_results.jsonl"
 
 model = GPT.from_pretrained(GPTConfig()).to(DEVICE).eval()
 
-def sync():
-    if DEVICE == "mps":
-        torch.mps.synchronize()
 
 if __name__ == "__main__":
     prompt = torch.full((1, PROMPT_LEN), 464, device=DEVICE)  # 464 = " The"

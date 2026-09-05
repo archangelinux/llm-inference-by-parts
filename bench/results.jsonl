@@ -1,6 +1,6 @@
-{"device": "mps", "n_new": 50, "label": "naive", "prompt_len": 16, "tok_per_sec": [40.65, 52.95, 45.36]}
-{"device": "mps", "n_new": 50, "label": "naive", "prompt_len": 128, "tok_per_sec": [17.21, 23.62, 21.95]}
-{"device": "mps", "n_new": 50, "label": "naive", "prompt_len": 512, "tok_per_sec": [1.36, 0.95, 0.74]}
-{"device": "mps", "n_new": 50, "label": "cached", "prompt_len": 16, "tok_per_sec": [45.23, 49.8, 49.83]}
-{"device": "mps", "n_new": 50, "label": "cached", "prompt_len": 128, "tok_per_sec": [24.81, 46.71, 47.36]}
-{"device": "mps", "n_new": 50, "label": "cached", "prompt_len": 512, "tok_per_sec": [38.12, 42.49, 33.26]}
+{"device": "mps", "n_new": 50, "label": "naive", "prompt_len": 16, "tok_per_sec": [12.05, 25.07, 21.33, 30.71, 29.79]}
+{"device": "mps", "n_new": 50, "label": "naive", "prompt_len": 128, "tok_per_sec": [2.5, 1.81, 1.78, 1.94, 7.74]}
+{"device": "mps", "n_new": 50, "label": "naive", "prompt_len": 512, "tok_per_sec": [0.67, 0.41, 0.52, 0.81, 0.76]}
+{"device": "mps", "n_new": 50, "label": "cached", "prompt_len": 16, "tok_per_sec": [19.45, 56.69, 59.57, 54.92, 54.38]}
+{"device": "mps", "n_new": 50, "label": "cached", "prompt_len": 128, "tok_per_sec": [33.22, 49.08, 50.98, 52.93, 55.54]}
+{"device": "mps", "n_new": 50, "label": "cached", "prompt_len": 512, "tok_per_sec": [6.29, 42.86, 46.61, 40.76, 42.04]}

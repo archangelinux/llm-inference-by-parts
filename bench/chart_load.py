@@ -43,20 +43,27 @@ for name, ys, color in series:
     ax1.plot(list(x), ys, color=color, linewidth=2, marker="o", markersize=5)
     ax1.annotate(name, (x[-1], ys[-1]), xytext=(6, 0), textcoords="offset points",
                  color=INK, fontsize=9, va="center")
-ax1.set_title("seconds per request", color=INK, fontsize=10, loc="left")
+ax1.set_title("latency per request (s)", color=INK, fontsize=10, loc="left")
 ax1.set_xlim(-0.3, len(rows) + 1.1)  # room for the direct labels
 
-# panel 2: throughput (single series -> one hue, thin bars, value labels)
-rps = [r["req_per_s"] for r in rows]
-bars = ax2.bar(list(x), rps, width=0.55, color=BLUE)
-for b, v in zip(bars, rps):
-    ax2.annotate(f"{v:.2f}", (b.get_x() + b.get_width() / 2, v), xytext=(0, 3),
+# panel 2: DELIVERED tokens/s (req/s x 25), vs the 4-slot raw decode ceiling
+CEILING = 88  # b=4 median from the batch sweep: what 4 always-busy slots produce
+tps = [r["req_per_s"] * 25 for r in rows]
+bars = ax2.bar(list(x), tps, width=0.55, color=BLUE)
+for b, v in zip(bars, tps):
+    ax2.annotate(f"{v:.0f}", (b.get_x() + b.get_width() / 2, v), xytext=(0, 3),
                  textcoords="offset points", ha="center", color=INK, fontsize=9)
-ax2.set_title("requests per second", color=INK, fontsize=10, loc="left")
+ax2.axhline(CEILING, color=MUTED, linewidth=1.2, linestyle=(0, (4, 3)))
+ax2.annotate("raw decode ceiling, 4 slots (~88)", (0, CEILING), xytext=(0, 4),
+             textcoords="offset points", color=MUTED, fontsize=8)
+ax2.set_ylim(0, CEILING * 1.18)
+ax2.set_title("delivered throughput (tok/s)", color=INK, fontsize=10, loc="left")
 
-fig.suptitle("serving under load: 4 slots saturate past c=8", color=INK,
-             fontsize=11, x=0.02, ha="left")
-fig.tight_layout(rect=(0, 0, 1, 0.92))
+fig.suptitle("Serving load test (M1, 4 slots)",
+             color=INK, fontsize=12, x=0.02, ha="left")
+fig.text(0.02, 0.885, "HTTP+SSE end to end, M1, 4 slots, 25 tokens/request, 3 waves per level, medians",
+         color=MUTED, fontsize=8)
+fig.tight_layout(rect=(0, 0, 1, 0.86))
 out = HERE / "load_results.png"
 fig.savefig(out, facecolor=SURFACE)
 print(f"wrote {out}")

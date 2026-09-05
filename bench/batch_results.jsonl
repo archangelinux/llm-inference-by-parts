@@ -1,8 +1,8 @@
-{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 1, "tok_per_sec": [15.71, 24.87, 29.41, 19.34, 39.69], "latency_s": [3.182, 2.01, 1.7, 2.585, 1.26]}
-{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 2, "tok_per_sec": [57.9, 50.86, 67.32, 73.0, 73.05], "latency_s": [1.727, 1.966, 1.485, 1.37, 1.369]}
-{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 4, "tok_per_sec": [89.62, 107.74, 106.13, 107.6, 108.16], "latency_s": [2.232, 1.856, 1.884, 1.859, 1.849]}
-{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 8, "tok_per_sec": [114.06, 141.12, 142.97, 143.44, 142.74], "latency_s": [3.507, 2.834, 2.798, 2.789, 2.802]}
-{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 16, "tok_per_sec": [396.99, 441.94, 558.4, 552.55, 561.91], "latency_s": [2.015, 1.81, 1.433, 1.448, 1.424]}
-{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 32, "tok_per_sec": [804.1, 986.21, 943.93, 918.28, 1020.29], "latency_s": [1.99, 1.622, 1.695, 1.742, 1.568]}
-{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 64, "tok_per_sec": [1122.96, 1573.79, 1541.31, 1609.32, 1272.84], "latency_s": [2.85, 2.033, 2.076, 1.988, 2.514]}
-{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 128, "tok_per_sec": [1202.35, 1961.97, 1944.75, 1929.95, 2049.47], "latency_s": [5.323, 3.262, 3.291, 3.316, 3.123]}
+{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 1, "tok_per_sec": [30.94, 28.31, 41.89, 40.72, 40.18], "latency_s": [1.616, 1.766, 1.194, 1.228, 1.244]}
+{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 2, "tok_per_sec": [38.93, 62.51, 65.44, 64.52, 65.63], "latency_s": [2.569, 1.6, 1.528, 1.55, 1.524]}
+{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 4, "tok_per_sec": [77.78, 92.82, 89.12, 87.8, 83.72], "latency_s": [2.571, 2.155, 2.244, 2.278, 2.389]}
+{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 8, "tok_per_sec": [101.92, 112.81, 115.13, 114.53, 112.13], "latency_s": [3.925, 3.546, 3.474, 3.493, 3.567]}
+{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 16, "tok_per_sec": [399.94, 518.84, 512.67, 514.87, 510.85], "latency_s": [2.0, 1.542, 1.56, 1.554, 1.566]}
+{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 32, "tok_per_sec": [752.86, 908.23, 913.35, 923.03, 828.78], "latency_s": [2.125, 1.762, 1.752, 1.733, 1.931]}
+{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 64, "tok_per_sec": [1119.58, 1488.02, 1404.04, 1518.56, 1459.77], "latency_s": [2.858, 2.151, 2.279, 2.107, 2.192]}
+{"device": "mps", "prompt_len": 16, "n_new": 50, "batch_size": 128, "tok_per_sec": [1292.68, 1873.83, 2049.77, 2016.05, 1997.97], "latency_s": [4.951, 3.415, 3.122, 3.175, 3.203]}

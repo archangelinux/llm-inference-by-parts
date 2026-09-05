@@ -1,0 +1,37 @@
+{
+  "device": "NVIDIA A10",
+  "n_new": 50,
+  "n_runs": 5,
+  "naive": {
+    "16": 195.9,
+    "128": 162.4,
+    "512": 52.4
+  },
+  "cached": {
+    "16": 173.9,
+    "128": 175.5,
+    "512": 171.1
+  },
+  "batched": {
+    "1": 159.3,
+    "2": 314.5,
+    "4": 633.8,
+    "8": 1209.7,
+    "16": 2413.5,
+    "32": 4909.0,
+    "64": 8789.3,
+    "128": 16428.2
+  },
+  "continuous_vs_static": {
+    "static_mean_s": 0.324,
+    "continuous_mean_s": 0.31,
+    "static_makespan_s": 0.477,
+    "continuous_makespan_s": 0.579
+  },
+  "bandwidth_check": {
+    "weight_gb": 0.498,
+    "floor_ms_per_token": 0.83,
+    "measured_ms_per_token": 5.75,
+    "multiple_of_floor": 6.9
+  }
+}
