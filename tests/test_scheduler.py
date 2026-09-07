@@ -8,7 +8,7 @@ Unlike generate_batch there is no pad tail; harvesting stops at eos
 import torch
 from transformers import GPT2Tokenizer
 
-from engine.config import DEVICE, GPTConfig
+from engine.config import DEVICE, GPTConfig, DTYPE
 from engine.model import GPT
 from engine.scheduler import Engine, Request
 
@@ -17,7 +17,7 @@ EOS = 13  # "." -- greedy gpt2 never emits the real eos in 50 tokens; borrow a f
 N_SLOTS = 3  # fewer slots than prompts -> forces queueing, waiting, slot recycling
 
 tok = GPT2Tokenizer.from_pretrained("gpt2")
-model = GPT.from_pretrained(GPTConfig()).to(DEVICE).eval()
+model = GPT.from_pretrained(GPTConfig()).to(DEVICE, DTYPE).eval()
 
 prompts = [
     "Hello",

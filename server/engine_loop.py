@@ -40,11 +40,11 @@ class EngineLoop:
 if __name__ == "__main__":
     #smoke test, no HTTP: two concurrent requests, tokens must print as generated but interleaved
     from transformers import GPT2Tokenizer
-    from engine.config import DEVICE, GPTConfig
+    from engine.config import DEVICE, GPTConfig, DTYPE
     from engine.model import GPT
 
     tok = GPT2Tokenizer.from_pretrained("gpt2")
-    model = GPT.from_pretrained(GPTConfig()).to(DEVICE).eval()
+    model = GPT.from_pretrained(GPTConfig()).to(DEVICE, DTYPE).eval()
     loop = EngineLoop(Engine(model=model, n_slots=2, max_len=128))
 
     async def stream(name, prompt):

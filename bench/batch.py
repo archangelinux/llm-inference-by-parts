@@ -15,7 +15,7 @@ from pathlib import Path
 
 import torch
 
-from engine.config import DEVICE, GPTConfig, sync
+from engine.config import DEVICE, GPTConfig, sync, DTYPE
 from engine.model import GPT
 
 BATCH_SIZES = [1, 2, 4, 8, 16, 32, 64, 128]
@@ -23,9 +23,11 @@ PROMPT_LEN = 16
 N_NEW = 50
 N_RUNS = 5 #median matters more than mean on a fanless machine?
 
-RESULTS_FILE = Path(__file__).parent / "batch_results.jsonl"
+#fp32 keeps the original filename (the README baseline); other dtypes get their own file
+SUFFIX = "" if DTYPE == torch.float32 else f".{str(DTYPE).split('.')[-1]}"
+RESULTS_FILE = Path(__file__).parent / f"batch_results{SUFFIX}.jsonl"
 
-model = GPT.from_pretrained(GPTConfig()).to(DEVICE).eval()
+model = GPT.from_pretrained(GPTConfig()).to(DEVICE, DTYPE).eval()
 
 
 if __name__ == "__main__":

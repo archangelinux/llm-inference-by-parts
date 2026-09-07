@@ -183,6 +183,63 @@ throughput.
 Reproduce: `brew install llama.cpp`, download the GGUF, then
 `llama-bench -m gpt2.f16.gguf -p 512 -n 50 -r 3`.
 
+## fp16
+
+`DTYPE=fp16` loads the weights in half precision. The KV cache buffers follow
+automatically (they take their dtype from the weights). Decode is memory-bound,
+so half the weight bytes should mean faster decode. fp32's extra precision is
+for training; inference only needs the biggest logit to stay biggest.
+
+One code change: the padding mask used `-1e9`, but fp16 caps at ±65,504, so
+`-1e9` overflows to `-inf` and all-masked pad rows softmax to NaN. Replaced
+with `torch.finfo(dtype).min`.
+
+Accuracy vs the fp32 HF fixtures:
+
+| | fp32 | fp16 |
+|---|---|---|
+| max logit err (8 fixtures) | ~1e-4 to 3e-4 | 0.14 to 0.44 |
+| greedy 50-token match | 8/8 exact | 5/8 exact |
+
+`test_logits` gates at 1e-3 for fp32 and 1.0 for fp16 — each a few times above
+the measured correct-code error, and far below the errors real bugs produce
+(tens). `test_greedy` requires exact match only at fp32; at fp16 it reports the
+match count.
+
+Speed on the A10G (`DTYPE=fp16 modal run bench/modal_bench.py` ->
+`modal_results.float16.json`):
+
+| | fp32 | fp16 |
+|---|---|---|
+| weight bytes per step | 0.50 GB | 0.25 GB |
+| bandwidth floor (ms/token) | 0.83 | 0.42 |
+| measured (ms/token, b=1) | 5.75 | 5.44 |
+| cached decode tok/s (b=1) | ~174 | ~182 |
+| batched tok/s (b=128) | 16,428 | 18,324 |
+| naive tok/s at 512 context | 52 | 163 |
+
+Halving the weight bytes made decode 6% faster, not 2x. Both measurements are
+the same ~5 ms of launch overhead plus the bandwidth floor (5.75 = 0.83 + 4.9;
+5.44 = 0.42 + 5.0); fp16 only shrinks the floor, so decode is now 13.1x off the
+physics instead of 6.9x. The exception is naive at 512 context, 3.1x faster:
+recomputing the full context every step is compute-bound matmul work, which
+fp16 does accelerate. On the M1 the batch sweep gains 1.4-1.7x from fp16 —
+the hardware is slow enough that memory time is a large share of each step,
+so halving bytes matters more there.
+
+This is why int8 alone won't help this engine: it moves the floor from 0.42 to
+0.21 ms and saves ~0.2 ms of a 5.4 ms step. The quantization work pairs int8
+with a fused GPU kernel instead.
+
+GPT-2 logits reach magnitude ~100 and fp16 carries ~3 significant digits, so
+~0.3 absolute error is ~0.3% relative, the expected precision of the format.
+In the 3 diverging generations, the top two tokens at some step are
+scored closer together than the rounding error, so greedy picks a different
+token than fp32 would, and generation continues down a different path from
+there. Exact-match tests can't gate lossy precision; the
+future quantization step would add gates that measure quality directly (top-1 agreement,
+perplexity).
+
 ## Limitations
 
 Deliberate scope cuts:

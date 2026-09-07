@@ -13,14 +13,18 @@
 
 # usage: modal run bench/modal_bench.py; writes bench/modal_results.json locally
 import json
+import os
 from pathlib import Path
 
 import modal
 
 app = modal.App("llm-inference-bench")
 
+#DTYPE=fp16 modal run ... -- the local env var is baked into the container env,
+#where engine/config.py reads it exactly like it does locally
 image = (modal.Image.debian_slim(python_version="3.12")
          .pip_install("torch", "transformers")
+         .env({"DTYPE": os.environ.get("DTYPE", "")})
          .add_local_dir("engine", remote_path="/root/engine"))
 
 A10G_BANDWIDTH_GB_S = 600  # spec sheet: 600 GB/s GDDR6
@@ -35,12 +39,12 @@ def bench():
     import statistics
     import time
     import torch
-    from engine.config import DEVICE, GPTConfig, sync
+    from engine.config import DEVICE, GPTConfig, sync, DTYPE
     from engine.model import GPT
 
     assert DEVICE == "cuda", f"expected cuda, got {DEVICE}"
-    model = GPT.from_pretrained(GPTConfig()).to(DEVICE).eval()
-    results = {"device": torch.cuda.get_device_name(0), "n_new": N_NEW, "n_runs": N_RUNS}
+    model = GPT.from_pretrained(GPTConfig()).to(DEVICE, DTYPE).eval()
+    results = {"device": torch.cuda.get_device_name(0), "dtype": str(DTYPE), "n_new": N_NEW, "n_runs": N_RUNS}
 
     def timed(fn, tokens):
         #median tok/s over N_RUNS, after one warmup call"""
@@ -150,6 +154,8 @@ def bench():
 @app.local_entrypoint()
 def main():
     results = bench.remote()
-    out = Path(__file__).parent / "modal_results.json"
+    #fp32 keeps the original filename (the README baseline); other dtypes get their own file
+    suffix = ".float16" if os.environ.get("DTYPE") == "fp16" else ""
+    out = Path(__file__).parent / f"modal_results{suffix}.json"
     out.write_text(json.dumps(results, indent=2))
     print(f"wrote {out}")

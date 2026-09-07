@@ -3,7 +3,7 @@
 import torch 
 from collections import deque 
 from dataclasses import dataclass, field # for the Request class
-from engine.model import PAD_TOKEN, GPT, GPTConfig, DEVICE
+from engine.model import PAD_TOKEN, GPT, GPTConfig, DEVICE, DTYPE
 from uuid import uuid4
 
 #postcodition of the whole system: when done=True and output_ids holds the same as what solo greedy generation would have produced, up to and including EOS or budget length (max_new_tokens)
@@ -115,7 +115,7 @@ if __name__ == "__main__":
     from transformers import GPT2Tokenizer
     tok = GPT2Tokenizer.from_pretrained("gpt2")
 
-    model = GPT.from_pretrained(GPTConfig()).to(DEVICE).eval()
+    model = GPT.from_pretrained(GPTConfig()).to(DEVICE, DTYPE).eval()
     scheduler = Engine(model = model, n_slots = 2, max_len = 64)
     for s in ["Hello", "Today is a very"]:
         ids = tok(s, return_tensors="pt").input_ids.to(DEVICE)

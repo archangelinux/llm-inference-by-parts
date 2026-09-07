@@ -18,7 +18,7 @@ from pathlib import Path
 
 import torch
 
-from engine.config import DEVICE, GPTConfig, sync
+from engine.config import DEVICE, GPTConfig, sync, DTYPE
 from engine.model import GPT
 
 PROMPT_LENGTHS = [16, 128, 512] #32 fold range in input size
@@ -28,9 +28,11 @@ N_NEW = 50 #new tokens per measurement, long enough to average out per-step jitt
 N_RUNS = 5 #median of 5, clean protocol
 COOLDOWN_S = 60 #pause between mechanisms so a heavy one doesn't heat/throttle the GPU for the next
 
-RESULTS_FILE = Path(__file__).parent / "results.jsonl"
+#fp32 keeps the original filename (the README baseline); other dtypes get their own file
+SUFFIX = "" if DTYPE == torch.float32 else f".{str(DTYPE).split('.')[-1]}"
+RESULTS_FILE = Path(__file__).parent / f"results{SUFFIX}.jsonl"
 
-model = GPT.from_pretrained(GPTConfig()).to(DEVICE).eval() #load the model once at module level, not timed; eval() is no op without batchnorm and dropout etc. since not training
+model = GPT.from_pretrained(GPTConfig()).to(DEVICE, DTYPE).eval() #load the model once at module level, not timed; eval() is no op without batchnorm and dropout etc. since not training
 
 
 @torch.no_grad()

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as funct
 import math
-from engine.config import DEVICE, GPTConfig
+from engine.config import DEVICE, GPTConfig, DTYPE
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
 PAD_TOKEN = 0 #filler id for pad slots; arbitrary (mask makes it weightless), module-level so tests can import it
@@ -92,7 +92,7 @@ class CausalSelfAttention(nn.Module):
         if attn_mask is not None:
             #apply no-attention to the mask for batching
             # the Nones without the colon is the same thing as .unsqueeze(1).unsqueeze(1) to add dimensions of 1 at position 1 to line up with nh, current_t dimensions in att
-            att = att.masked_fill(attn_mask[:, None, None, :] == 0, -1e9) #not -inf to avoid padding all -inf --> softmax to NaN
+            att = att.masked_fill(attn_mask[:, None, None, :] == 0, torch.finfo(att.dtype).min) #not -inf to avoid padding all -inf --> softmax to NaN
 
         att = att.masked_fill(self.tril_mask[:, :, total_t - current_t : total_t, :total_t] == 0, float('-inf')) 
         att = funct.softmax(att, dim=-1)
@@ -205,7 +205,7 @@ class GPT(nn.Module):
         # written into slice-by-slice each step. max_len = the most positions we could ever hold: prompt + new tokens, capped at block_size (the model can't attend past that)
         max_len = min(ids.shape[1] + max_new_tokens, self.config.block_size)
         kv_cache = [
-            (torch.empty(b, self.config.n_head, max_len, head_size, device=w.device, dtype=w.dtype),
+            (torch.empty(b, self.config.n_head, max_len, head_size, device=w.device, dtype=w.dtype), #this way buffer allocations can just follow the weights and both be fp16
              torch.empty(b, self.config.n_head, max_len, head_size, device=w.device, dtype=w.dtype),
              0) # (k_past, v_past, past_len): past_len counts how many positions are filled
             for _ in range(self.config.n_layer)
@@ -312,6 +312,6 @@ if __name__ == "__main__":
     print("gpt:", x.shape)
 
     tok = GPT2Tokenizer.from_pretrained("gpt2")
-    model = GPT.from_pretrained(GPTConfig()).to(DEVICE).eval()
+    model = GPT.from_pretrained(GPTConfig()).to(DEVICE, DTYPE).eval()
     ids = tok("The meaning of life is", return_tensors="pt").input_ids.to(DEVICE) #(b, t) = (1, 5); or t the sequence length is the number of subword tokens. b is batch size = number of input strings
     print(tok.decode(model.generate(ids, max_new_tokens=20)[0]))

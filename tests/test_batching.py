@@ -7,13 +7,13 @@ Contract this test imposes on model.generate_batch:
 """
 import torch
 from transformers import GPT2Tokenizer
-from engine.config import DEVICE, GPTConfig
+from engine.config import DEVICE, GPTConfig, DTYPE
 from engine.model import GPT
 
 N_NEW = 50
 
 tok = GPT2Tokenizer.from_pretrained("gpt2")
-model = GPT.from_pretrained(GPTConfig()).to(DEVICE).eval()
+model = GPT.from_pretrained(GPTConfig()).to(DEVICE, DTYPE).eval()
 
 # token lengths span 1..27
 # "Hello" (1 token) needs 26 pad slots when batched with the longest

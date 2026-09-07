@@ -8,13 +8,13 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, StreamingResponse
 from transformers import GPT2Tokenizer
 
-from engine.config import DEVICE, GPTConfig
+from engine.config import DEVICE, GPTConfig, DTYPE
 from engine.model import GPT
 from engine.scheduler import Engine, Request
 from server.engine_loop import EngineLoop
 
 tok = GPT2Tokenizer.from_pretrained("gpt2")
-model = GPT.from_pretrained(GPTConfig()).to(DEVICE).eval()
+model = GPT.from_pretrained(GPTConfig()).to(DEVICE, DTYPE).eval()
 eloop = EngineLoop(Engine(model=model, n_slots=4, max_len=512))
 
 

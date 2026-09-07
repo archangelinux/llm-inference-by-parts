@@ -15,7 +15,7 @@ import httpx
 import torch
 from transformers import GPT2Tokenizer
 
-from engine.config import DEVICE, GPTConfig
+from engine.config import DEVICE, GPTConfig, DTYPE
 from engine.model import GPT
 
 PORT = 8400  # not 8000: don't collide with a dev server that's already running
@@ -24,7 +24,7 @@ N_CONCURRENT = 20
 N_NEW = 25  # keep the run short; concurrency is what's under test, not length
 
 tok = GPT2Tokenizer.from_pretrained("gpt2")
-model = GPT.from_pretrained(GPTConfig()).to(DEVICE).eval()
+model = GPT.from_pretrained(GPTConfig()).to(DEVICE, DTYPE).eval()
 
 prompts = [
     "Hello",

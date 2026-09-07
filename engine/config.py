@@ -1,5 +1,8 @@
 import torch
 from dataclasses import dataclass
+import os
+
+DTYPE = torch.float16 if os.environ.get("DTYPE")=="fp16" else torch.float32 #replaces model.half()
 
 if torch.cuda.is_available():
     DEVICE = "cuda"

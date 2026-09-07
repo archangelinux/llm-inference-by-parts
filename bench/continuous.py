@@ -18,7 +18,7 @@ from pathlib import Path
 import torch
 from transformers import GPT2Tokenizer
 
-from engine.config import DEVICE, GPTConfig, sync
+from engine.config import DEVICE, GPTConfig, sync, DTYPE
 from engine.model import GPT
 from engine.scheduler import Engine, Request
 
@@ -30,7 +30,7 @@ N_RUNS = 3
 RESULTS_FILE = Path(__file__).parent / "continuous_results.jsonl"
 
 tok = GPT2Tokenizer.from_pretrained("gpt2")
-model = GPT.from_pretrained(GPTConfig()).to(DEVICE).eval()
+model = GPT.from_pretrained(GPTConfig()).to(DEVICE, DTYPE).eval()
 
 prompts = [
     "Hello",
