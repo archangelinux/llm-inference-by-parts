@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.nn import functional as funct
+from torch.nn import functional as F
 import math
 from engine.config import DEVICE, GPTConfig, DTYPE
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
@@ -95,7 +95,7 @@ class CausalSelfAttention(nn.Module):
             att = att.masked_fill(attn_mask[:, None, None, :] == 0, torch.finfo(att.dtype).min) #not -inf to avoid padding all -inf --> softmax to NaN
 
         att = att.masked_fill(self.tril_mask[:, :, total_t - current_t : total_t, :total_t] == 0, float('-inf')) 
-        att = funct.softmax(att, dim=-1)
+        att = F.softmax(att, dim=-1)
 
         y = att @ v # (b, n_head, t, t) x (b, n_head, t, head_size) -> (b, n_head, t, head_size)
         y = y.transpose(1, 2).contiguous().view(b, current_t, c) #re-assemble all head outputs side by side
@@ -244,7 +244,7 @@ class GPT(nn.Module):
                     v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
                     logits[logits < v[:, [-1]]] = -float('Inf')
                 # softmax turns raw scores into probabilities (all positive, sum to 1)
-                probs = funct.softmax(logits, dim=-1)
+                probs = F.softmax(logits, dim=-1)
                 # multinomial = weighted dice roll
                 next_id = torch.multinomial(probs, num_samples=1) # (b, 1)
             ids = torch.cat((ids, next_id), dim=1) # append -> next iteration sees it as context
@@ -291,10 +291,9 @@ class GPT(nn.Module):
                 logits, kv_cache = self(next_id, kv_past=kv_cache, attn_mask=mask)
             if completed.all(): 
                 missing = (t_max + max_new_tokens) - ids.size(1) 
-                ids = funct.pad(ids, (0, missing), value=PAD_TOKEN)
+                ids = F.pad(ids, (0, missing), value=PAD_TOKEN)
                 break
         return ids #(b, t_max + max_new_tokens)
-
 
 
 if __name__ == "__main__":

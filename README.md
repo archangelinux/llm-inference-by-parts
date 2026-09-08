@@ -218,7 +218,7 @@ Speed on the A10G (`DTYPE=fp16 modal run bench/modal_bench.py` ->
 | batched tok/s (b=128) | 16,428 | 18,324 |
 | naive tok/s at 512 context | 52 | 163 |
 
-Halving the weight bytes made decode 6% faster, not 2x. Both measurements are
+Halving the weight bytes sepd up decode by 6%. It's not 2x because both measurements have
 the same ~5 ms of launch overhead plus the bandwidth floor (5.75 = 0.83 + 4.9;
 5.44 = 0.42 + 5.0); fp16 only shrinks the floor, so decode is now 13.1x off the
 physics instead of 6.9x. The exception is naive at 512 context, 3.1x faster:
@@ -240,13 +240,44 @@ there. Exact-match tests can't gate lossy precision; the
 future quantization step would add gates that measure quality directly (top-1 agreement,
 perplexity).
 
+## int8
+
+`engine/quant.py` stores each weight matrix as int8 plus one fp16 scale per
+output row (`w ~= q * scale`, `scale = row_max / 127`; per-row so a quiet row
+isn't rounded on a grid sized for the loudest one). `quantize_model()` swaps
+the four Linears in every block. Embeddings, `lm_head` (weight-tied to the
+embeddings), and LayerNorms stay fp16.
+
+`QuantLinear.forward` dequantizes to fp16 and then matmuls (deliberately
+slow, the fp16 copy round-trips through memory, more traffic than fp32). It's
+the correctness reference for the fused kernel, which will dequantizes in
+registers instead.
+
+Max logit err vs the fp32 fixtures: 0.65-4.4 (fp16 alone: 0.14-0.44).
+`tests/test_quant.py` checks `|q * scale - w|` against the half-tick bound,
+QuantLinear against its Linear, and the quantized model against the fixtures.
+
+
+## Quality gates
+
+`eval/quality.py` runs each precision variant over a 16k-token WikiText-2
+slice (32 chunks of 512, no sliding window => blind spot on start of each chunk, so it isn't comparable to
+published numbers, but is valid here for the purpose of comparing the variants)
+
+| | fp32 | fp16 | int8 |
+|---|---|---|---|
+| perplexity | 37.679 | 37.676 | 37.691 |
+| top-1 agreement vs fp32 | — | 98.5% | 97.3% |
+| max centered logit diff vs fp32 | — | 2.1 | 10.8 |
+
+int8 costs +0.03% perplexity and agrees with fp32 on 97.3% of next-token
+picks. The logit diff is measured after subtracting each position's mean
+logit: quantization sometimes shifts a position's entire logit vector by ~200,
+but softmax only uses the gaps between logits, so a uniform shift can't
+affect output and shouldn't count as error. Raw (uncentered) max diff was 211
+for int8; centered it's 10.8.
+
 ## Limitations
-
-Deliberate scope cuts:
-
-- **No custom kernels** — every decode step pays per-op Python dispatch.
-- **fp32, no quantization** — 2-4x more memory traffic than fp16/int8, and
-  decode is memory-bound. (planned future step)
 - **Pad-and-mask batching, not paged attention** — recycled cache slots waste
   columns on masked-off junk, and the shared frontier burns a column per lap.
 - **No chunked prefill** — admitting a long prompt stalls all running streams
@@ -259,7 +290,9 @@ Deliberate scope cuts:
 
 ```
 engine/model.py        GPT-2 from scratch: forward, KV cache, generate, generate_batch
+engine/quant.py        int8 weights + per-row fp16 scales; QuantLinear (slow reference path)
 engine/scheduler.py    Engine: continuous batching (slots, frontier, admit/evict)
+eval/quality.py        quality gates for lossy precision: perplexity, top-1 agreement
 server/engine_loop.py  async bridge: inbox -> engine loop task -> per-request outboxes
 server/app.py          FastAPI: POST /generate (SSE), browser demo page at /
 tests/                 the correctness chain (pytest tests/)
@@ -274,5 +307,6 @@ python bench/run.py      # naive vs KV cache          -> results.jsonl
 python bench/batch.py    # throughput vs batch size   -> batch_results.jsonl
 python bench/continuous.py  # continuous vs static    -> continuous_results.jsonl
 python bench/load.py     # serving under load         -> load_results.json
+python eval/quality.py   # ppl + top-1 per precision  -> eval/quality_results.json
 python bench/chart_progression.py && python bench/chart_load.py && python bench/chart_continuous.py && python bench/chart_modal.py
 ```
