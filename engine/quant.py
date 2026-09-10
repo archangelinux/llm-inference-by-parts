@@ -1,6 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+try: 
+    import triton
+    import triton.language as tl
+except ImportError: triton = None
 
 #per channel quantization
 def quantize_weight(w): #->(q, scale)
@@ -20,8 +24,28 @@ class QuantLinear(nn.Module):
         self.register_buffer("scale", s)
         
     def forward(self, x):
-        w = self.q.to(x.dtype)* self.scale
+        if x.is_cuda and x.dtype == torch.float16:
+            return self._forward_kernel(x)
+        w = self.q.to(x.dtype)* self.scale #slow path for mps/cpu
         return F.linear(x, w, self.bias) #x @ w.T + bias
+    
+    def _forward_kernel(self, x):
+        from kernels.dequant_matmul import dequant_matmul_kernel
+        N = self.q.shape[0]
+        K = x.shape[-1]   # 768, always the last dim
+        x2 = x.reshape(-1, K)              # (4, 10, 768) -> (40, 768)
+        M = x2.shape[0]                    # 40 
+        BM, BN, BK = 16, 64, 64 
+        s = self.scale.squeeze(1)
+        #w = self.q.to(x.dtype)* self.scale
+        w = torch.empty((M, N), device=x.device, dtype=x.dtype) #acc (and out) is fp32
+        grid = (triton.cdiv(M, BM), triton.cdiv(N, BN)) 
+        dequant_matmul_kernel[grid](x, self.q, s, w,
+                        x2.stride(0), x2.stride(1), # stride(0) = jump one row, stride(1) = jump one col
+                        self.q.stride(1), self.q.stride(0),   #swap for B to be (K, N)   
+                        w.stride(0), w.stride(1),
+                        M, N, K, BLOCK_M=BM, BLOCK_N=BN, BLOCK_K=BK)
+        return (w + self.bias).reshape(*x.shape[:-1], N)   #(40, 2304) -> (4, 10, 2304)
 
 
 def quantize_model(model):

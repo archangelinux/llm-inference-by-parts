@@ -43,3 +43,5 @@ def main():
     #not 0.0 like vector_add: loads/tl.dot is fp16, round differently than the ref which is fp32
     #~0.05 on ~128 is healthy; ~100 means a stride bug
     print((out - ref).abs().max().item())
+    print(M)
+

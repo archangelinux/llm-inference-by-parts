@@ -10,7 +10,8 @@ app = modal.App("llm-inference-kernels")
 image = (modal.Image.debian_slim(python_version="3.12")
          .pip_install("torch", "transformers")
          .add_local_dir("engine", remote_path="/root/engine")
-         .add_local_dir("kernels", remote_path="/root/kernels"))
+         .add_local_dir("kernels", remote_path="/root/kernels")
+         .add_local_dir("tests", remote_path="/root/tests"))
 
 
 @app.function(gpu="A10G", image=image, timeout=600)
@@ -19,6 +20,21 @@ def run(name: str):
     mod = importlib.import_module(f"kernels.{name}")
     mod.main()
 
+@app.function(gpu="A10G", image=image, timeout=1200)
+def run_tests():
+    #the quant test suite on cuda, fp16 -- the dtype the kernel path serves.
+    #on cuda test_kernel actually runs and quantize_model takes the kernel path
+    import os
+    import subprocess
+    env = {**os.environ, "DTYPE": "fp16"}
+    subprocess.run(["python", "tests/test_quant.py"], check=True, cwd="/root", env=env)
+
+
 @app.local_entrypoint()
 def main(name: str = "vector_add"):
-    run.remote(name)
+    #modal run kernels/dev.py --name matmul      -> runs kernels/matmul.py's main()
+    #modal run kernels/dev.py --name tests       -> runs tests/test_quant.py (kernel path live)
+    if name == "tests":
+        run_tests.remote()
+    else:
+        run.remote(name)

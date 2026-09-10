@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 from transformers import GPT2Tokenizer
 
 from engine.config import DEVICE, GPTConfig, DTYPE
@@ -43,6 +44,26 @@ def test_layer(): #QuantLinear vs the Linear it replaces, same input
     assert err < 1.0 # measured ~0.1; real bugs (wrong scale dim, transposed q) come in at tens
 
 
+def test_kernel(): #fused triton kernel == the slow dequant path (cuda only; triton has no mps build)
+    if not torch.cuda.is_available():
+        print("kernel: skipped (needs cuda)")
+        return
+    block = model.transformer.h[0]
+    for layer in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
+        #fresh fp16 copy of the layer so this test works whatever DTYPE the model loaded as
+        lin = torch.nn.Linear(layer.in_features, layer.out_features, device=DEVICE, dtype=torch.float16)
+        with torch.inference_mode():
+            lin.weight.copy_(layer.weight)
+            lin.bias.copy_(layer.bias)
+            qlayer = QuantLinear(lin)
+            x = torch.randn(2, 5, layer.in_features, device=DEVICE, dtype=torch.float16)
+            fused = qlayer(x) #cuda + fp16 -> kernel path
+            slow = F.linear(x, qlayer.q.to(x.dtype) * qlayer.scale, qlayer.bias)
+            err = (fused - slow).abs().max().item()
+        print(f"kernel vs slow path ({layer.out_features}x{layer.in_features}): max abs err = {err:.4f}")
+        assert err < 0.1 # same q both sides, so only summation rounding differs; stride bugs come in at tens
+
+
 def test_model_logits(): #quantized model vs the fp32 HF fixtures
     quantize_model(model) #mutates -- keep this test last
     for i, prompt in enumerate(GENERATIONS, 1):
@@ -58,4 +79,5 @@ def test_model_logits(): #quantized model vs the fp32 HF fixtures
 if __name__ == "__main__":
     test_roundtrip()
     test_layer()
+    test_kernel()
     test_model_logits()
