@@ -12,7 +12,8 @@ from engine.config import DEVICE, GPTConfig, DTYPE
 from engine.model import GPT
 
 TESTS_DIR = Path(__file__).parent
-with open(TESTS_DIR / "fixture_generations.json") as f: #written by make_fixtures.py
+FIXTURES = TESTS_DIR / "fixtures" / "gpt2"
+with open(FIXTURES / "fixture_generations.json") as f: #written by make_fixtures.py
     GENERATIONS = json.load(f)
 
 tok = GPT2Tokenizer.from_pretrained("gpt2")
@@ -24,7 +25,7 @@ TOL = 1e-3 if DTYPE == torch.float32 else 1.0
 
 def test_logits(): #check if one forward pass produces the same values as HF
     for i, prompt in enumerate(GENERATIONS, 1):
-        ref = torch.load(TESTS_DIR / f"fixture_logits_{i}.pt", map_location="cpu")
+        ref = torch.load(FIXTURES / f"fixture_logits_{i}.pt", map_location="cpu")
         ids = tok(prompt, return_tensors="pt").input_ids.to(DEVICE) # to mps (input and model must be on same device)
         with torch.inference_mode():
             logits, kv = model(ids) # no cache passed => kv = [None]*n_layer

@@ -16,7 +16,8 @@ from engine.model import GPT
 from engine.quant import QuantLinear, quantize_model, quantize_weight
 
 TESTS_DIR = Path(__file__).parent
-with open(TESTS_DIR / "fixture_generations.json") as f:
+FIXTURES = TESTS_DIR / "fixtures" / "gpt2"
+with open(FIXTURES / "fixture_generations.json") as f:
     GENERATIONS = json.load(f)
 
 tok = GPT2Tokenizer.from_pretrained("gpt2")
@@ -67,7 +68,7 @@ def test_kernel(): #fused triton kernel == the slow dequant path (cuda only; tri
 def test_model_logits(): #quantized model vs the fp32 HF fixtures
     quantize_model(model) #mutates -- keep this test last
     for i, prompt in enumerate(GENERATIONS, 1):
-        ref = torch.load(TESTS_DIR / f"fixture_logits_{i}.pt", map_location="cpu")
+        ref = torch.load(FIXTURES / f"fixture_logits_{i}.pt", map_location="cpu")
         ids = tok(prompt, return_tensors="pt").input_ids.to(DEVICE)
         with torch.inference_mode():
             logits, _ = model(ids)
