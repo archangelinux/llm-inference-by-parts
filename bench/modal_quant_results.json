@@ -1,0 +1,55 @@
+{
+  "device": "NVIDIA A10",
+  "n_new": 50,
+  "n_runs": 5,
+  "variants": {
+    "fp32": {
+      "decode_tok_s": 173.0,
+      "ms_per_token": 5.779,
+      "weight_gb_per_step": 0.498,
+      "floor_ms": 0.83,
+      "pct_of_bandwidth": 14.4
+    },
+    "fp16": {
+      "decode_tok_s": 181.4,
+      "ms_per_token": 5.514,
+      "weight_gb_per_step": 0.249,
+      "floor_ms": 0.415,
+      "pct_of_bandwidth": 7.5
+    },
+    "int8-torch": {
+      "decode_tok_s": 141.5,
+      "ms_per_token": 7.069,
+      "weight_gb_per_step": 0.164,
+      "floor_ms": 0.274,
+      "pct_of_bandwidth": 3.9
+    },
+    "int8-kernel": {
+      "decode_tok_s": 124.2,
+      "ms_per_token": 8.051,
+      "weight_gb_per_step": 0.164,
+      "floor_ms": 0.274,
+      "pct_of_bandwidth": 3.4
+    }
+  },
+  "c_attn_op": {
+    "fp16_linear": {
+      "us": 9.5,
+      "bytes_moved": 3538944,
+      "achieved_gb_s": 373.7,
+      "pct_of_bandwidth": 62.3
+    },
+    "int8_slow": {
+      "us": 35.7,
+      "bytes_moved": 8847360,
+      "achieved_gb_s": 247.6,
+      "pct_of_bandwidth": 41.3
+    },
+    "int8_kernel": {
+      "us": 6.3,
+      "bytes_moved": 1769472,
+      "achieved_gb_s": 278.8,
+      "pct_of_bandwidth": 46.5
+    }
+  }
+}
