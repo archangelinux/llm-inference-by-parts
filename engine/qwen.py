@@ -3,19 +3,26 @@ import torch.nn as nn
 from torch.nn import functional as F
 import math
 from engine.config import DEVICE, QwenConfig, DTYPE
+from transformers import AutoTokenizer
 
 PAD_TOKEN = 0 #filler id for pad slots; arbitrary (mask makes it weightless), module-level so tests can import it
 
+# helpers for RoPE
+def rotate_half(x):
+    return torch.cat((-x[..., 64:], x[..., :64]), dim=-1)
+    
+def apply_rope(x, cos, sin):
+    return x * cos + rotate_half(x) * sin
+
+
+# no positional embedding
 class Embedding(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.wte = nn.Embedding(config.vocab_size, config.n_embd) #token embeddings
 
-    def forward(self, ids, past_length = 0, pos_ids = None):
-        device = ids.device
-        t = ids.shape[1]
+    def forward(self, ids, past_length = 0):
         tok_emb = self.wte(ids) # (b, t, n_embd)
-
         return tok_emb 
 
 
@@ -51,9 +58,18 @@ class CausalSelfAttention(nn.Module):
         # instead in forward, build only the slice needed - (current_t, total_t) mask. use diagonal argument to shift the diagonal by the number of cached tokens (which is total_t - current)t
        
 
+        #RoPE:
+        #the paper defines the ladder as wavelengths growing with i (e.g. pair i laps every X = 2pi * theta^(2i/d) positions)
+        #inverse of this is the angular speed => rotation angle of pair i = position of token that pair is in * inv_freq[i]
+        inv_freq = config.rope_theta ** (-torch.arange(0, config.head_dim, 2) / config.head_dim) #shape (64,)
+        self.register_buffer("inv_freq", inv_freq, persistent = False) #computed on the fly, not precomputed and not learned
+
+   
+
     #kv_cache: (k_past, v_past, past_len) - full-size buffers preallocated by generate(); only the first past_len positions are used
     #attn_mask: (b, total_t) 
-    def forward(self, x, kv_cache = None, attn_mask = None): 
+    #pos_ids passed here for RoPE
+    def forward(self, x, kv_cache = None, attn_mask = None, pos_ids = None): 
         b, t, c = x.shape #(b, t, n_embd)
         q = self.q_proj(x)
         k = self.k_proj(x)
@@ -62,6 +78,16 @@ class CausalSelfAttention(nn.Module):
         q = q.view(b, t, self.n_head, self.head_dim).transpose(1, 2)
         k = k.view(b, t, self.n_kv_head, self.head_dim).transpose(1, 2)
         v = v.view(b, t, self.n_kv_head, self.head_dim).transpose(1, 2)
+
+        #TODO QK-Norm goes here
+
+        #RoPE
+        angles = pos_ids[:, None, :, None].float() * self.inv_freq  # (b, 1, t, 64) broadcast over heads
+        emb = torch.cat((angles, angles), dim=-1) # (b, 1, t, 128) each pair's angle in both its slots
+        cos, sin = emb.cos().to(q.dtype), emb.sin().to(q.dtype)
+        q = apply_rope(q, cos, sin)
+        k = apply_rope(k, cos, sin)
+        # v untouched
 
         if kv_cache is not None:
             k_past, v_past, past_len = kv_cache
@@ -99,7 +125,7 @@ class CausalSelfAttention(nn.Module):
 
         return self.o_proj(y), new_kv_cache
 
-class MLP(nn.Module): 
+class MLP(nn.Module): #SwiGLU = silu + gating
     def __init__(self, config):
         super().__init__()
         self.up_proj = nn.Linear(config.n_embd, config.intermediate_size, bias = config.bias) #original content / detectors
@@ -118,8 +144,8 @@ class Block(nn.Module):
         self.attn = CausalSelfAttention(config)
         self.mlp = MLP(config)
 
-    def forward(self, x, kv_cache= None, attn_mask = None):
-        attn_out, next_kv_cache = self.attn(self.ln_1(x), kv_cache=kv_cache, attn_mask = attn_mask) 
+    def forward(self, x, kv_cache= None, attn_mask = None, pos_ids = None):
+        attn_out, next_kv_cache = self.attn(self.ln_1(x), kv_cache=kv_cache, attn_mask = attn_mask, pos_ids = pos_ids)  #pass pos_ids through to attention
         x = x + attn_out #add to input --> residual/skip connection
         x = x + self.mlp(self.ln_2(x)) 
         return x, next_kv_cache
@@ -128,7 +154,7 @@ class Qwen(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.transformer = nn.ModuleDict(dict(
-            embd = Embedding(config), #could get rid of this module and merge in to match HF naming 
+            embd = Embedding(config), 
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]), #hidden blocks
             ln_f = RMSNorm(config.n_embd) #final
         )
@@ -143,21 +169,22 @@ class Qwen(nn.Module):
         else:
             past_length = 0
 
+        x = self.transformer.embd(ids, past_length=past_length)
+        t = ids.shape[1]
 
         # build pos_ids left-padding for batching
         if attn_mask is None:
-            x = self.transformer.embd(ids, past_length=past_length, pos_ids = None)
+            pos_ids = torch.arange(past_length, past_length + t, device=ids.device)[None, :].expand(ids.size(0), -1) #for shape (b, t); expand(dim0 = b, dim1 = keep)
         else:
             #slot position = number of 1s strictly to its left in its row of the attn_mask
             #inclusive cumulative sum , minus 1 and clamp negative to get exclusive
             pos_ids = (torch.cumsum(attn_mask, dim=-1) - 1).clamp(min=0) # (b, total_t)
             pos_ids = pos_ids[:, -ids.size(1):]  # keep last t columns: mask covers cache+input, embd only embeds input
-            x = self.transformer.embd(ids, past_length=past_length, pos_ids=pos_ids)
 
         new_kv = [] #per layer cache tensors
         for i, block in enumerate(self.transformer.h):
             layer_past = kv_past[i] if kv_past is not None else None
-            x, layer_cache = block(x, kv_cache=layer_past, attn_mask=attn_mask)
+            x, layer_cache = block(x, kv_cache=layer_past, attn_mask=attn_mask, pos_ids = pos_ids)
             new_kv.append(layer_cache)
         x = self.lm_head(self.transformer.ln_f(x))
         return x, new_kv
@@ -165,7 +192,7 @@ class Qwen(nn.Module):
     @classmethod
     def from_pretrained(cls, config):
         model = cls(config)
-   
+
         return model
 
     @torch.no_grad() # inference only -> don't build the autograd graph (faster, less memory)
@@ -191,10 +218,6 @@ class Qwen(nn.Module):
             else:
                 # decode: cache holds k/v for every earlier position, so only the newest token needs a forward pass
                 ids_cond = ids[:, [-1]]
-                # v1 overflow handling: reset-and-reprefill -> exact (fresh positions 0..1023), but re-runs a full block_size prefill on EVERY step past the limit:
-                # if ids.size(1) > self.config.block_size:
-                #     ids_cond = ids[:, -self.config.block_size:]
-                #     kv_cache = None
                 if kv_cache[0][2] == max_len:
                     # SLIDING: cache is full (only happens once we hit block_size) -> drop oldest position: roll shifts everything one slot left, the stale
                     # copy left in the last slot gets overwritten by this step's write.
