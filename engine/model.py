@@ -195,7 +195,7 @@ class GPT(nn.Module):
         return model
 
     @torch.no_grad() # inference only -> don't build the autograd graph (faster, less memory)
-    def generate(self, ids, max_new_tokens, do_sample=False, temperature=1.0, top_k=None):
+    def generate(self, ids, max_new_tokens, do_sample=False, temperature=1.0, top_k=None, eos_id=None):
         """Autoregressive decoding: predict one token, append it, repeat.
         ids: (b, t) prompt token ids -> returns (b, t + max_new_tokens)."""
         b = ids.shape[0]
@@ -248,6 +248,8 @@ class GPT(nn.Module):
                 # multinomial = weighted dice roll
                 next_id = torch.multinomial(probs, num_samples=1) # (b, 1)
             ids = torch.cat((ids, next_id), dim=1) # append -> next iteration sees it as context
+            if eos_id is not None and (next_id == eos_id).all():
+                break # stop the step eos is emitted, like hf's generate
 
         return ids
 
