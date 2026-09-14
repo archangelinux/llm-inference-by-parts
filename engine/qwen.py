@@ -27,9 +27,9 @@ class Embedding(nn.Module):
 
 
 class RMSNorm(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, dim = None): #dim for QK Norm
         super().__init__()
-        self.weight = nn.Parameter(torch.ones(config.n_embd))
+        self.weight = nn.Parameter(torch.ones(dim or config.n_embd))
         self.eps = config.rms_norm_eps
 
     def forward(self, x):
@@ -49,6 +49,10 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_kv_head = config.n_kv_head
         self.head_dim = config.head_dim
+
+        #QK Norm
+        self.q_norm = RMSNorm(config, dim = config.head_dim)
+        self.k_norm = RMSNorm(config, dim = config.head_dim)
 
         # lower triangular causal mask -> only attend to the left in the input sequence
         # this would be 4.3GB per layer...
@@ -79,7 +83,10 @@ class CausalSelfAttention(nn.Module):
         k = k.view(b, t, self.n_kv_head, self.head_dim).transpose(1, 2)
         v = v.view(b, t, self.n_kv_head, self.head_dim).transpose(1, 2)
 
-        #TODO QK-Norm goes here
+        #QK-Norm
+        q = self.q_norm(q) #(b, 16, t, 128)
+        k = self.k_norm(k) #(b, 8, t, 128)
+        #v untouched
 
         #RoPE
         angles = pos_ids[:, None, :, None].float() * self.inv_freq  # (b, 1, t, 64) broadcast over heads
