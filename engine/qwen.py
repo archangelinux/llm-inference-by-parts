@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 import math
 from engine.config import DEVICE, QwenConfig, DTYPE
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 PAD_TOKEN = 0 #filler id for pad slots; arbitrary (mask makes it weightless), module-level so tests can import it
 
@@ -24,7 +24,6 @@ class Embedding(nn.Module):
     def forward(self, ids, past_length = 0):
         tok_emb = self.wte(ids) # (b, t, n_embd)
         return tok_emb 
-
 
 class RMSNorm(nn.Module):
     def __init__(self, config, dim = None): #dim for QK Norm
@@ -61,14 +60,12 @@ class CausalSelfAttention(nn.Module):
 
         # instead in forward, build only the slice needed - (current_t, total_t) mask. use diagonal argument to shift the diagonal by the number of cached tokens (which is total_t - current)t
        
-
         #RoPE:
         #the paper defines the ladder as wavelengths growing with i (e.g. pair i laps every X = 2pi * theta^(2i/d) positions)
         #inverse of this is the angular speed => rotation angle of pair i = position of token that pair is in * inv_freq[i]
         inv_freq = config.rope_theta ** (-torch.arange(0, config.head_dim, 2) / config.head_dim) #shape (64,)
         self.register_buffer("inv_freq", inv_freq, persistent = False) #computed on the fly, not precomputed and not learned
 
-   
 
     #kv_cache: (k_past, v_past, past_len) - full-size buffers preallocated by generate(); only the first past_len positions are used
     #attn_mask: (b, total_t) 
@@ -107,6 +104,13 @@ class CausalSelfAttention(nn.Module):
             new_kv_cache = (k_past, v_past, total) #same buffers, counter advanced by t
         else:
             new_kv_cache = None #plain forward (tests/logit checks) builds no cache
+
+        #GQA (grouped query attention)
+        #dim=1 is the heads axis of (b, head, T, 128)
+        #repeat_interleave gives k0, k0, k1, k1, etc. consecutive q heads share a kv head
+        rep = self.n_head // self.n_kv_head #16/8 = 2 k/v per query
+        k = k.repeat_interleave(rep, dim=1) # (b, 8, T, 128) -> (b, 16, t, 128)
+        v = v.repeat_interleave(rep, dim=1)
 
         #dynamic mask slicing
         current_t = q.size(-2)
@@ -163,7 +167,7 @@ class Qwen(nn.Module):
         self.transformer = nn.ModuleDict(dict(
             embd = Embedding(config), 
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]), #hidden blocks
-            ln_f = RMSNorm(config.n_embd) #final
+            ln_f = RMSNorm(config) #final
         )
         )
         self.lm_head = nn.Linear(in_features = config.n_embd, out_features = config.vocab_size, bias = False)
@@ -199,11 +203,28 @@ class Qwen(nn.Module):
     @classmethod
     def from_pretrained(cls, config):
         model = cls(config)
-
+        sd = model.state_dict()
+        model_hf = AutoModelForCausalLM.from_pretrained('Qwen/Qwen3-0.6B-Base')
+        sd_hf = model_hf.state_dict()
+        
+        with torch.no_grad():
+            for k in sd_hf.keys():
+                my_k = k.replace("model.layers.", "transformer.h.") \
+                        .replace("self_attn", "attn") \
+                        .replace("input_layernorm", "ln_1") \
+                        .replace("post_attention_layernorm", "ln_2") \
+                        .replace("model.norm", "transformer.ln_f") \
+                        .replace("model.embed_tokens", "transformer.embd.wte")
+        
+                #no transpose branch here, qwen uses plain nn.Linear (no Conv1D)              
+                assert sd_hf[k].shape == sd[my_k].shape
+                sd[my_k].copy_(sd_hf[k])
+        
+        print(f"loaded {len(sd_hf)} tensors")
         return model
 
     @torch.no_grad() # inference only -> don't build the autograd graph (faster, less memory)
-    def generate(self, ids, max_new_tokens, do_sample=False, temperature=1.0, top_k=None):
+    def generate(self, ids, max_new_tokens, do_sample=False, temperature=1.0, top_k=None, eos_id=None):
         """Autoregressive decoding: predict one token, append it, repeat.
         ids: (b, t) prompt token ids -> returns (b, t + max_new_tokens)."""
         b = ids.shape[0]
@@ -212,8 +233,8 @@ class Qwen(nn.Module):
         # written into slice-by-slice each step. max_len = the most positions we could ever hold: prompt + new tokens, capped at block_size (the model can't attend past that)
         max_len = min(ids.shape[1] + max_new_tokens, self.config.block_size)
         kv_cache = [
-            (torch.empty(b, self.config.n__kv_head, max_len, self.config.head_dim, device=w.device, dtype=w.dtype), #this way buffer allocations can just follow the weights and both be fp16
-             torch.empty(b, self.config.n__kv_head, max_len, self.config.head_dim, device=w.device, dtype=w.dtype),
+            (torch.empty(b, self.config.n_kv_head, max_len, self.config.head_dim, device=w.device, dtype=w.dtype), #this way buffer allocations can just follow the weights and both be fp16
+             torch.empty(b, self.config.n_kv_head, max_len, self.config.head_dim, device=w.device, dtype=w.dtype),
              0) # (k_past, v_past, past_len): past_len counts how many positions are filled
             for _ in range(self.config.n_layer)
         ]
@@ -251,6 +272,8 @@ class Qwen(nn.Module):
                 # multinomial = weighted dice roll
                 next_id = torch.multinomial(probs, num_samples=1) # (b, 1)
             ids = torch.cat((ids, next_id), dim=1) # append -> next iteration sees it as context
+            if eos_id is not None and (next_id == eos_id).all():
+                break # stop the step eos is emitted, like hf's generate
 
         return ids
 
@@ -272,8 +295,8 @@ class Qwen(nn.Module):
         assert(max_len <= self.config.block_size)
 
         kv_cache = [
-            (torch.empty(b, self.config.n__kv_head, max_len, head_dim, device=w.device, dtype=w.dtype),
-            torch.empty(b, self.config.n__kv_head, max_len, head_dim, device=w.device, dtype=w.dtype),
+            (torch.empty(b, self.config.n_kv_head, max_len, self.config.head_dim, device=w.device, dtype=w.dtype),
+            torch.empty(b, self.config.n_kv_head, max_len, self.config.head_dim, device=w.device, dtype=w.dtype),
                 0) for _ in range(self.config.n_layer)
         ]
 
