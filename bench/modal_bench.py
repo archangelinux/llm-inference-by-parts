@@ -47,7 +47,7 @@ def bench():
     results = {"device": torch.cuda.get_device_name(0), "model": MODEL, "dtype": str(DTYPE), "n_new": N_NEW, "n_runs": N_RUNS}
 
     def timed(fn, tokens):
-        #median tok/s over N_RUNS, after one warmup call"""
+        #median tok/s over N_RUNS, after one warmup call
         fn()
         runs = []
         for _ in range(N_RUNS):

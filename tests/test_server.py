@@ -76,7 +76,7 @@ def test_concurrent_requests():
         [sys.executable, "-m", "uvicorn", "server.app:app", "--port", str(PORT)],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        deadline = time.time() + 90  # model load takes a while
+        deadline = time.time() + 240  # both models load at boot
         while time.time() < deadline:
             try:
                 httpx.get(BASE + "/", timeout=2)

@@ -5,6 +5,7 @@ from collections import deque
 from dataclasses import dataclass, field # for the Request class
 from engine.model import PAD_TOKEN, GPT, GPTConfig, DEVICE, DTYPE # the gpt part is just for main, this scheduler also does qwen
 from uuid import uuid4
+from engine.sampling import pick_next
 
 #postcodition of the whole system: when done=True and output_ids holds the same as what solo greedy generation would have produced, up to and including EOS or budget length (max_new_tokens)
 @dataclass
@@ -12,6 +13,9 @@ class Request:
     prompt_ids: torch.Tensor #(1, P) on DEVICE
     max_new_tokens: int
     eos_id : int | None = None
+    do_sample: bool = False #greedy unless asked; temperature/top_k only matter when sampling
+    temperature: float = 1.0
+    top_k: int | None = None
     output_ids: list = field(default_factory=list)
     done: bool = False
     cancelled: bool = False #for when a client disconnects or times out
@@ -77,7 +81,7 @@ class Engine:
             
     #logit argmax selection + tokenization + recording to output + eos/budget detection atomically follows every model call (prefill + decode)
     def _intake(self, slot, logits, request):
-        pick = logits[:, -1, :].argmax(dim=-1, keepdim=True)
+        pick = pick_next(logits[:, -1, :], request.do_sample, request.temperature, request.top_k)
         token = pick.item()
         self.next_id[slot] = pick
         request.output_ids.append(token) #not the full tensor with device and stuff
