@@ -24,7 +24,7 @@ app = modal.App("llm-inference-bench")
 #where engine/config.py reads it exactly like it does locally
 image = (modal.Image.debian_slim(python_version="3.12")
          .pip_install("torch", "transformers")
-         .env({"DTYPE": os.environ.get("DTYPE", "")})
+         .env({"DTYPE": os.environ.get("DTYPE", ""), "MODEL": os.environ.get("MODEL", "gpt2")})
          .add_local_dir("engine", remote_path="/root/engine"))
 
 A10G_BANDWIDTH_GB_S = 600  # spec sheet: 600 GB/s GDDR6
@@ -39,12 +39,12 @@ def bench():
     import statistics
     import time
     import torch
-    from engine.config import DEVICE, GPTConfig, sync, DTYPE
-    from engine.model import GPT
+    from engine.config import DEVICE, DTYPE, MODEL, sync
+    from engine.load import load_model
 
     assert DEVICE == "cuda", f"expected cuda, got {DEVICE}"
-    model = GPT.from_pretrained(GPTConfig()).to(DEVICE, DTYPE).eval()
-    results = {"device": torch.cuda.get_device_name(0), "dtype": str(DTYPE), "n_new": N_NEW, "n_runs": N_RUNS}
+    model, tok = load_model()
+    results = {"device": torch.cuda.get_device_name(0), "model": MODEL, "dtype": str(DTYPE), "n_new": N_NEW, "n_runs": N_RUNS}
 
     def timed(fn, tokens):
         #median tok/s over N_RUNS, after one warmup call"""
@@ -83,10 +83,7 @@ def bench():
 
     # continuous vs static under a staggered workload (mirrors bench/continuous.py:
     # same 8 requests, eos="." so finishes stagger; metric = per-request completion time)
-    from transformers import GPT2Tokenizer
-
     from engine.scheduler import Engine, Request
-    tok = GPT2Tokenizer.from_pretrained("gpt2")
     prompts = ["Hello", "The meaning of life is",
                "In 2019, OpenAI released a language model that", "def fibonacci(n):",
                "1, 1, 2, 3, 5, 8, 13,",
@@ -94,7 +91,7 @@ def bench():
                "The quick brown fox jumps over the lazy dog. The quick brown fox",
                "Alice gave the book to Bob because he had asked her politely. Later that afternoon, Bob returned it to"]
     all_ids = [tok(p, return_tensors="pt").input_ids.to(DEVICE) for p in prompts]
-    N_SLOTS, EOS = 3, 13
+    N_SLOTS, EOS = 3, tok(".").input_ids[0]
 
     def static_run():
         done_at, t0 = [0.0] * len(prompts), time.perf_counter()
@@ -155,7 +152,8 @@ def bench():
 def main():
     results = bench.remote()
     #fp32 keeps the original filename (the README baseline); other dtypes get their own file
-    suffix = ".float16" if os.environ.get("DTYPE") == "fp16" else ""
+    m = os.environ.get("MODEL", "gpt2")
+    suffix = ("" if m == "gpt2" else f".{m}") + (".float16" if os.environ.get("DTYPE") == "fp16" else "")
     out = Path(__file__).parent / f"modal_results{suffix}.json"
     out.write_text(json.dumps(results, indent=2))
     print(f"wrote {out}")

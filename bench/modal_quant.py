@@ -6,6 +6,7 @@
 
 # usage: modal run bench/modal_quant.py; writes bench/modal_quant_results.json
 import json
+import os
 from pathlib import Path
 
 import modal
@@ -14,6 +15,7 @@ app = modal.App("llm-inference-quant-bench")
 
 image = (modal.Image.debian_slim(python_version="3.12")
          .pip_install("torch", "transformers")
+         .env({"MODEL": os.environ.get("MODEL", "gpt2")})
          .add_local_dir("engine", remote_path="/root/engine")
          .add_local_dir("kernels", remote_path="/root/kernels"))
 
@@ -29,12 +31,11 @@ def bench():
 
     import torch
     import torch.nn.functional as F
-    from engine.config import DEVICE, GPTConfig, sync
-    from engine.model import GPT
+    from engine.config import DEVICE, MODEL, GPTConfig, QwenConfig, sync
     from engine.quant import QuantLinear, quantize_model
 
     assert DEVICE == "cuda"
-    results = {"device": torch.cuda.get_device_name(0), "n_new": N_NEW, "n_runs": N_RUNS}
+    results = {"device": torch.cuda.get_device_name(0), "model": MODEL, "n_new": N_NEW, "n_runs": N_RUNS}
 
     def timed(fn, tokens):
         fn()  # warmup
@@ -56,7 +57,13 @@ def bench():
         return b
 
     def build(name):
-        model = GPT.from_pretrained(GPTConfig()).to(DEVICE, torch.float32 if name == "fp32" else torch.float16).eval()
+        dtype = torch.float32 if name == "fp32" else torch.float16
+        if MODEL == "qwen":
+            from engine.qwen import Qwen
+            model = Qwen.from_pretrained(QwenConfig()).to(DEVICE, dtype).eval()
+        else:
+            from engine.model import GPT
+            model = GPT.from_pretrained(GPTConfig()).to(DEVICE, dtype).eval()
         if name.startswith("int8"):
             model = quantize_model(model)
             for m in model.modules():
@@ -91,11 +98,13 @@ def bench():
     #matrices per token and gets no such reuse
     N_COPIES = 8  # 8 x 3.5MB fp16 (or 1.77MB int8) copies > 6MB L2
     model = build("int8-kernel")
-    layer = model.transformer.h[0].attn.c_attn
+    #the widest attention projection: c_attn (gpt-2, 2304x768) / q_proj (qwen3, 2048x1024)
+    layer = model.transformer.h[0].attn.c_attn if MODEL == "gpt2" else model.transformer.h[0].attn.q_proj
+    results["op_layer"] = "c_attn" if MODEL == "gpt2" else "q_proj"
     qs = [layer.q.clone() for _ in range(N_COPIES)]
     scales = [layer.scale.clone() for _ in range(N_COPIES)]
     w16s = [(q.to(torch.float16) * sc) for q, sc in zip(qs, scales)]
-    x = torch.randn(1, 1, 768, device=DEVICE, dtype=torch.float16)
+    x = torch.randn(1, 1, layer.q.shape[1], device=DEVICE, dtype=torch.float16)  # K = in_features of that layer
 
     def op_time(fn, reps=100, iters=30):
         #cuda-graph replay: capture `reps` launches once, time replays. a plain
@@ -156,6 +165,7 @@ def bench():
 @app.local_entrypoint()
 def main():
     results = bench.remote()
-    out = Path(__file__).parent / "modal_quant_results.json"
+    m = os.environ.get("MODEL", "gpt2")
+    out = Path(__file__).parent / f"modal_quant_results{'' if m == 'gpt2' else '.' + m}.json"
     out.write_text(json.dumps(results, indent=2))
     print(f"wrote {out}")

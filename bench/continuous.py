@@ -16,21 +16,20 @@ import time
 from pathlib import Path
 
 import torch
-from transformers import GPT2Tokenizer
 
-from engine.config import DEVICE, GPTConfig, sync, DTYPE
+from engine.config import DEVICE, RUN_TAG, sync
+from engine.load import load_model
 from engine.model import GPT
 from engine.scheduler import Engine, Request
 
 N_SLOTS = 3
 N_NEW = 50
-EOS = 13  # "."
 N_RUNS = 3
 
-RESULTS_FILE = Path(__file__).parent / "continuous_results.jsonl"
+RESULTS_FILE = Path(__file__).parent / f"continuous_results{RUN_TAG}.jsonl"
 
-tok = GPT2Tokenizer.from_pretrained("gpt2")
-model = GPT.from_pretrained(GPTConfig()).to(DEVICE, DTYPE).eval()
+model, tok = load_model()
+EOS = tok(".").input_ids[0]  # "." -- greedy rarely emits the real eos in 50 tokens; borrow a frequent token
 
 prompts = [
     "Hello",

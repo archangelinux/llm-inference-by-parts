@@ -15,20 +15,20 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 from datasets import load_dataset
-from transformers import GPT2Tokenizer
+from transformers import AutoTokenizer
 
-from engine.config import DEVICE, GPTConfig, sync
-from engine.model import GPT
+from engine.config import DEVICE, MODEL, GPTConfig, QwenConfig, sync
+from engine.load import HF_ID
 from engine.quant import quantize_model
 
 CHUNK = 512 #tokens per forward pass (511 predictions each)
 N_CHUNKS = 32 #~16k tokens total
-RESULTS_FILE = Path(__file__).parent / "quality_results.json"
+RESULTS_FILE = Path(__file__).parent / f"quality_results{'' if MODEL == 'gpt2' else '.' + MODEL}.json"
 
-tok = GPT2Tokenizer.from_pretrained("gpt2")
+tok = AutoTokenizer.from_pretrained(HF_ID[MODEL])
 
 #one long token stream from the wikitext test split, cut into chunks
-text = "\n\n".join(t for t in load_dataset("wikitext", "wikitext-2-raw-v1", split="test")["text"] if t.strip())
+text = "\n\n".join(t for t in load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split="test")["text"] if t.strip())
 ids = tok(text, return_tensors="pt").input_ids[0, : CHUNK * N_CHUNKS]
 chunks = ids.view(N_CHUNKS, CHUNK).to(DEVICE)
 print(f"eval corpus: {ids.numel()} tokens in {N_CHUNKS} chunks of {CHUNK}")
@@ -63,6 +63,10 @@ def evaluate(model, ref_model):
 
 
 def load(dtype):
+    if MODEL == "qwen":
+        from engine.qwen import Qwen
+        return Qwen.from_pretrained(QwenConfig()).to(DEVICE, dtype).eval()
+    from engine.model import GPT
     return GPT.from_pretrained(GPTConfig()).to(DEVICE, dtype).eval()
 
 

@@ -6,15 +6,13 @@ from contextlib import asynccontextmanager
 import torch
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, StreamingResponse
-from transformers import GPT2Tokenizer
 
-from engine.config import DEVICE, GPTConfig, DTYPE
-from engine.model import GPT
+from engine.config import DEVICE
+from engine.load import MODEL_LABEL, load_model
 from engine.scheduler import Engine, Request
 from server.engine_loop import EngineLoop
 
-tok = GPT2Tokenizer.from_pretrained("gpt2")
-model = GPT.from_pretrained(GPTConfig()).to(DEVICE, DTYPE).eval()
+model, tok = load_model() #MODEL=qwen / DTYPE=fp16 env knobs pick what gets served
 eloop = EngineLoop(Engine(model=model, n_slots=4, max_len=512))
 
 
@@ -85,7 +83,9 @@ async def generate(body: dict):
 
 @app.get("/")
 async def home():
-    return HTMLResponse("""<!doctype html>
+    return HTMLResponse(PAGE.replace("__MODEL__", MODEL_LABEL))
+
+PAGE = """<!doctype html>
 <title>llm-inference</title>
 <style>
   body { font-family: ui-monospace, "SF Mono", Menlo, monospace; background: #fdfdfc;
@@ -108,7 +108,7 @@ async def home():
 </style>
 <body>
 <h1>llm-inference</h1>
-<div class="sub">gpt-2 124m served from this machine &middot;
+<div class="sub">__MODEL__ served from this machine &middot;
 mechanisms run one at a time so timings are fair (no gpu contention)</div>
 <div id="inputs" style="display:grid;gap:6px">
   <input class="pin" value="The meaning of life is" placeholder="prompt 1">
@@ -236,4 +236,4 @@ async function readSSE(resp, onEvent) {
   return last;
 }
 </script>
-</body>""")
+</body>"""

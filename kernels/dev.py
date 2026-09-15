@@ -1,6 +1,8 @@
 #Triton dev loop for Modal: ships kernels/ to an A10G and runs main() of the file specified
 #each kernel file defines main(): build inputs, run the kernel, compare against a torch reference, print match + timing (see _template.py)
 # usage: modal run kernels/dev.py --name vector_add   (runs kernels/vector_add.py)
+import os
+
 import modal
 
 app = modal.App("llm-inference-kernels")
@@ -9,6 +11,7 @@ app = modal.App("llm-inference-kernels")
 #no need to pip install triton: the linux/CUDA torch build already includes it (MPS torch doesn't)
 image = (modal.Image.debian_slim(python_version="3.12")
          .pip_install("torch", "transformers")
+         .env({"MODEL": os.environ.get("MODEL", "gpt2")})
          .add_local_dir("engine", remote_path="/root/engine")
          .add_local_dir("kernels", remote_path="/root/kernels")
          .add_local_dir("tests", remote_path="/root/tests"))

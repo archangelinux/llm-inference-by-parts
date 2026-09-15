@@ -1,0 +1,15 @@
+{
+  "fp32": {
+    "perplexity": 15.417
+  },
+  "fp16": {
+    "perplexity": 15.419,
+    "top1_agreement": 0.9969,
+    "max_centered_logit_diff": 0.487
+  },
+  "int8": {
+    "perplexity": 15.532,
+    "top1_agreement": 0.9695,
+    "max_centered_logit_diff": 18.49
+  }
+}
