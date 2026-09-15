@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 import math
 from engine.config import DEVICE, QwenConfig, DTYPE
+from engine.sampling import pick_next
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 PAD_TOKEN = 0 #filler id for pad slots; arbitrary (mask makes it weightless), module-level so tests can import it
@@ -224,7 +225,7 @@ class Qwen(nn.Module):
         return model
 
     @torch.no_grad() # inference only -> don't build the autograd graph (faster, less memory)
-    def generate(self, ids, max_new_tokens, do_sample=False, temperature=1.0, top_k=None, eos_id=None):
+    def generate(self, ids, max_new_tokens, do_sample=False, temperature=1.0, top_k=None, eos_id=None, on_step=None):
         """Autoregressive decoding: predict one token, append it, repeat.
         ids: (b, t) prompt token ids -> returns (b, t + max_new_tokens)."""
         b = ids.shape[0]
@@ -257,28 +258,18 @@ class Qwen(nn.Module):
 
             logits, kv_cache = self(ids_cond, kv_past = kv_cache) # (b, t, vocab_size): a score for "what comes next" at every position
             # we only want the prediction after the last token; temperature rescales confidence: <1 exaggerates the gap between high and low scores, >1 shrinks it (1.0 = untouched)
-            logits = logits[:, -1, :] / temperature # (b, vocab_size)
-            if not do_sample:
-                # greedy: always take the single highest-scoring token. deterministic for testing
-                next_id = logits.argmax(dim=-1, keepdim=True) # (b, 1)
-            else:
-                # sampling: pick the next token at random, weighted by the model's confidence
-                if top_k is not None:
-                    # keep only the k best-scoring tokens: find the kth-best score per row, set everything below it to -inf (-> probability 0 after softmax), random draw can never land on a garbage tail token
-                    v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                    logits[logits < v[:, [-1]]] = -float('Inf')
-                # softmax turns raw scores into probabilities (all positive, sum to 1)
-                probs = F.softmax(logits, dim=-1)
-                # multinomial = weighted dice roll
-                next_id = torch.multinomial(probs, num_samples=1) # (b, 1)
+            # greedy (argmax) unless do_sample; sampling = temperature, top-k cutoff, weighted draw -- see engine/sampling.py
+            next_id = pick_next(logits[:, -1, :], do_sample, temperature, top_k) # (b, 1)
             ids = torch.cat((ids, next_id), dim=1) # append -> next iteration sees it as context
+            if on_step is not None: #progress hook for the dashboard: (step index, context length now)
+                on_step(i, ids.shape[1])
             if eos_id is not None and (next_id == eos_id).all():
                 break # stop the step eos is emitted, like hf's generate
 
         return ids
 
     @torch.no_grad()
-    def generate_batch(self, all_ids, max_new_tokens, eos_id=None): #all_ids is a python list of b tensors
+    def generate_batch(self, all_ids, max_new_tokens, eos_id=None, do_sample=False, temperature=1.0, top_k=None, on_step=None): #all_ids is a python list of b tensors
         t_max = max(ids.shape[1] for ids in all_ids)
         b = len(all_ids)
         w = self.lm_head.weight
@@ -306,12 +297,14 @@ class Qwen(nn.Module):
 
         for i in range(max_new_tokens):
             logits = logits[:, -1, :] 
-            next_id = logits.argmax(dim=-1, keepdim=True) # (b, 1)
+            next_id = pick_next(logits, do_sample, temperature, top_k) # (b, 1); greedy unless do_sample
             if eos_id is not None:
                 next_id[completed] = PAD_TOKEN #bool tensor indexing, sets position with True in completed to the pad
                 completed = completed.masked_fill(next_id.squeeze(1) == eos_id , True) #like a "stop generating stuff" switch takes effect next iteration
             ids = torch.cat((ids, next_id), dim=1)
             mask = torch.cat((mask, torch.ones((b, 1), dtype=torch.long, device=w.device)), dim = 1)
+            if on_step is not None:
+                on_step(i, ids.shape[1])
             if i < max_new_tokens - 1: #final forward is never read
                 logits, kv_cache = self(next_id, kv_past=kv_cache, attn_mask=mask)
             if completed.all(): 
