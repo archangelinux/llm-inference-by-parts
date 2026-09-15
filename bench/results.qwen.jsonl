@@ -1,0 +1,3 @@
+{"device": "mps", "n_new": 50, "label": "cached", "prompt_len": 16, "tok_per_sec": [11.79, 10.66, 7.64, 13.37, 12.78]}
+{"device": "mps", "n_new": 50, "label": "cached", "prompt_len": 128, "tok_per_sec": [10.73, 12.37, 12.61, 11.83, 11.6]}
+{"device": "mps", "n_new": 50, "label": "cached", "prompt_len": 512, "tok_per_sec": [0.11, 0.32, 0.78, 0.94, 2.54]}

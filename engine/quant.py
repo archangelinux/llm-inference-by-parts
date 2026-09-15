@@ -47,13 +47,22 @@ class QuantLinear(nn.Module):
                         w.stride(0), w.stride(1),
                         M, N, K, BLOCK_M=BM, BLOCK_N=BN, BLOCK_K=BK,
                         num_warps=4) #config from the kernels/sweep_graph.py race on A10G
-        return (w + self.bias).reshape(*x.shape[:-1], N)   #(40, 2304) -> (4, 10, 2304)
+        if self.bias is not None: #qwen3 linears have no bias
+            w = w + self.bias
+        return w.reshape(*x.shape[:-1], N)   #(40, 2304) -> (4, 10, 2304)
 
 
 def quantize_model(model):
-    for block in model.transformer.h: #for each hiddne block
-        block.attn.c_attn = QuantLinear(block.attn.c_attn)
-        block.attn.c_proj = QuantLinear(block.attn.c_proj)
-        block.mlp.c_fc = QuantLinear(block.mlp.c_fc)
-        block.mlp.c_proj = QuantLinear(block.mlp.c_proj)
+    #swap every nn.Linear except lm_head (weight-tied to the embedding table)
+    #gpt-2 has 4 per block, qwen3 has 7
+    #the gpt-2-only version this replaced:
+    #for block in model.transformer.h:
+    #    block.attn.c_attn = QuantLinear(block.attn.c_attn)
+    #    block.attn.c_proj = QuantLinear(block.attn.c_proj)
+    #    block.mlp.c_fc = QuantLinear(block.mlp.c_fc)
+    #    block.mlp.c_proj = QuantLinear(block.mlp.c_proj)
+    for parent in list(model.modules()):
+        for name, child in list(parent.named_children()):
+            if isinstance(child, nn.Linear) and child is not model.lm_head:
+                setattr(parent, name, QuantLinear(child))
     return model

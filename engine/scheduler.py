@@ -3,7 +3,7 @@
 import torch 
 from collections import deque 
 from dataclasses import dataclass, field # for the Request class
-from engine.model import PAD_TOKEN, GPT, GPTConfig, DEVICE, DTYPE
+from engine.model import PAD_TOKEN, GPT, GPTConfig, DEVICE, DTYPE # the gpt part is just for main, this scheduler also does qwen
 from uuid import uuid4
 
 #postcodition of the whole system: when done=True and output_ids holds the same as what solo greedy generation would have produced, up to and including EOS or budget length (max_new_tokens)
@@ -26,7 +26,7 @@ class Engine:
         self.n_slots = n_slots
         self.max_len = max_len
         w = model.lm_head.weight #choose any for device and dtype
-        head_size = self.cfg.n_embd // self.cfg.n_head
+        head_size = self.cfg.head_dim
 
         #allocates workspace, ledger and counters
         self.waiting = deque()
@@ -36,8 +36,8 @@ class Engine:
 
         #pairs; the counter isn't a storable state here
         self.kv_buffers = [
-            (torch.empty(n_slots, self.cfg.n_head, max_len, head_size, device=w.device, dtype=w.dtype),
-            torch.empty(n_slots, self.cfg.n_head, max_len, head_size, device=w.device, dtype=w.dtype))
+            (torch.empty(n_slots, self.cfg.n_kv_head, max_len, head_size, device=w.device, dtype=w.dtype),
+            torch.empty(n_slots, self.cfg.n_kv_head, max_len, head_size, device=w.device, dtype=w.dtype))
             for _ in range(self.cfg.n_layer)
         ]
 
@@ -87,6 +87,7 @@ class Engine:
             request.done = True
         self.step_events.append((request.req_id, token, request.done))
 
+    @torch.no_grad() #inference only: without this every step's forward chains onto the persistent kv buffers' autograd graph and memory grows per step
     def step(self) -> list: #(req_id, token, done)
         self.step_events = [] 
         self._evict()

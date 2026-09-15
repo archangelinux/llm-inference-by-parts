@@ -3,6 +3,9 @@ from dataclasses import dataclass
 import os
 
 DTYPE = torch.float16 if os.environ.get("DTYPE")=="fp16" else torch.float32 #replaces model.half()
+MODEL = os.environ.get("MODEL", "gpt2") #gpt2 | qwen -- which architecture engine/load.py builds
+#suffix for bench result files: gpt2 fp32 keeps the original names (the README baseline)
+RUN_TAG = ("" if MODEL == "gpt2" else f".{MODEL}") + ("" if DTYPE == torch.float32 else ".float16")
 
 if torch.cuda.is_available():
     DEVICE = "cuda"
@@ -27,6 +30,10 @@ class GPTConfig:
     n_head: int = 12
     n_embd: int = 768
     bias: bool = True
+
+    #also specify qwen fields for scheduler to take in the same config shapes
+    n_kv_head: int = 12
+    head_dim: int = 64
 
 @dataclass
 class QwenConfig:
