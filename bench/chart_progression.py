@@ -34,11 +34,9 @@ batched = median_of("batch_results.jsonl", batch_size=16)
 stages = ["naive\n(no cache)", "+ KV cache", "+ batching\n(b=16)"]
 values = [naive, cached, batched]
 
-# reference palette: sequential blue ramp for the engine progression (one hue,
-# more-is-darker = magnitude); served is a different kind of number -> green slot
-RAMP = ["#9ec5f4", "#5598e7", "#1c5cab"]
-GREEN = "#008300"
-INK, MUTED, GRID, SURFACE = "#0b0b0b", "#898781", "#e1e0d9", "#fcfcfb"
+#the dashboard's mechanism colors: naive red, kv cache green, batching olive
+RAMP = ["#a9d0d3", "#2e8f95", "#1f6469"]  #light -> dark by stage
+INK, MUTED, GRID, SURFACE = "#1a1a1a", "#8b8a85", "#e4e3dd", "#fdfdfc"
 
 fig, ax = plt.subplots(figsize=(7, 3.4), dpi=150)
 fig.patch.set_facecolor(SURFACE)
@@ -58,12 +56,12 @@ for b, v in zip(bars, values):
                 (b.get_x() + b.get_width() / 2, v), xytext=(0, 4),
                 textcoords="offset points", ha="center", color=INK, fontsize=10)
 
-ax.set_title("Decode throughput by optimization stage",
-             color=INK, fontsize=12, loc="left", pad=30)
-ax.text(0, 1.115, "GPT-2 124M, M1 (MPS), greedy, 50 new tokens, median of 5",
-        transform=ax.transAxes, color=MUTED, fontsize=8)
-ax.text(0, 1.055, "naive/cached: one sequence, 512-token context  •  batched: 16 short prompts, total tok/s",
-        transform=ax.transAxes, color=MUTED, fontsize=8)
+ax.set_title("GPT-2 on the M1: decode throughput by mechanism",
+             color=INK, fontsize=13, loc="left", pad=30)
+ax.text(0, 1.115, "Greedy decoding, 50 new tokens, median of 5 runs, MPS backend.",
+        transform=ax.transAxes, color=MUTED, fontsize=9.5)
+ax.text(0, 1.055, "Naive and cached: one sequence, 512-token context. Batched: 16 prompts, total tok/s.",
+        transform=ax.transAxes, color=MUTED, fontsize=9.5)
 fig.tight_layout()
 out = HERE / "progression.png"
 fig.savefig(out, facecolor=SURFACE)

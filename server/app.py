@@ -39,8 +39,25 @@ BLOCKING_MODES = {
 WORK = {"naive": lambda ctx, b: ctx, "cached": lambda ctx, b: 1, "static": lambda ctx, b: b}
 
 
+def _warmup():
+    #mps compiles kernels per tensor shape on first use, so the first run of each mechanism
+    #after boot is several times slower than every run after it. run each path once now so the
+    #user's first race is representative (a few seconds per model at boot)
+    for name, (model, tok, eloop) in MODELS.items():
+        t0 = time.perf_counter()
+        ids = tok("warmup", return_tensors="pt").input_ids.to(DEVICE)
+        noop = lambda i, ctx: None
+        _naive(model, ids, 3, {}, noop)
+        model.generate(ids, max_new_tokens=4)
+        model.generate_batch([ids, ids], max_new_tokens=4)
+        eloop.engine.submit(Request(prompt_ids=ids, max_new_tokens=4))
+        eloop.engine.run()
+        print(f"warmup {name}: {time.perf_counter() - t0:.1f}s")
+
+
 @asynccontextmanager
 async def lifespan(app):
+    _warmup()
     tasks = [asyncio.create_task(eloop.run()) for _, _, eloop in MODELS.values()]  # one loop per model, started at boot
     yield # server runs here
     for t in tasks:
@@ -145,8 +162,12 @@ PAGE = """<!doctype html>
   #prompts { display: grid; gap: 6px; margin-bottom: 28px; }
   h2 { font-size: 12px; font-weight: 600; color: #8b8a85; text-transform: uppercase; letter-spacing: 0.06em;
        margin: 28px 0 8px; border-bottom: 1px solid #e4e3dd; padding-bottom: 6px; }
-  .mech { display: grid; grid-template-columns: 300px 1fr 150px; gap: 0 24px; align-items: start;
-          padding: 12px 0; border-bottom: 1px solid #f0efea; }
+  #mechs, #stream .mech { border: 1px solid #e4e3dd; }
+  .mech { display: grid; grid-template-columns: 300px 1fr 150px; gap: 0; align-items: start; }
+  .mech + .mech { border-top: 1px solid #e4e3dd; }
+  .mech > div { padding: 12px 14px; }
+  .mech > div + div { border-left: 1px solid #e4e3dd; }
+  #stream .mech { margin-top: 10px; }
   .mech .name { font-weight: 600; }
   .mech .desc { color: #8b8a85; font-size: 12px; }
   .mech .status { font-size: 12px; text-align: right; color: #3d3c39; white-space: pre-line; }
