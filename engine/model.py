@@ -69,16 +69,23 @@ class CausalSelfAttention(nn.Module):
         #     v = torch.concat((v_past, v), dim=-2)
         # new_kv_cache = (k, v)
 
-        #v2 preallocated: k_past is always max_len long - past tokens + empty slots - so past_len (not .shape) 
         if kv_cache is not None:
             k_past, v_past, past_len = kv_cache
-            total = past_len + t
-            k_past[:, :, past_len:total] = k
-            v_past[:, :, past_len:total] = v
-            #attend over the filled prefix only; slicing returns a view, not a copy
-            k = k_past[:, :, :total]
-            v = v_past[:, :, :total]
-            new_kv_cache = (k_past, v_past, total) #same buffers, counter advanced by t
+            #v3 static shaped cache to be capturable for CUDA graphing
+            if isinstance(past_len, torch.Tensor):
+                #along dim 2 (column position axis), copy k into the columns whose indices are in past_len
+                k_past.index_copy_(2, past_len, k) #column is frontier that comes from device tensor, read at run time t=1
+                v_past.index_copy_(2, past_len, v)
+                k, v = k_past, v_past #attend over the whole buffer => fixed shape
+                new_kv_cache = (k_past, v_past, past_len) #engine owns the advancement of frontier += 1 and refill the tensor
+            else: #v2 preallocated: k_past is always max_len long - past tokens + empty slots - so past_len (not .shape) 
+                total = past_len + t
+                k_past[:, :, past_len:total] = k
+                v_past[:, :, past_len:total] = v
+                # attend over the filled prefix only; slicing returns a view, not a copy
+                k = k_past[:, :, :total]
+                v = v_past[:, :, :total]
+                new_kv_cache = (k_past, v_past, total) #same buffers, counter advanced by t
         else:
             new_kv_cache = None #plain forward (tests/logit checks) builds no cache
 

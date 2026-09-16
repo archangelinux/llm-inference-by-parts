@@ -23,7 +23,6 @@ class Request:
 
 
 class Engine:
-
     def __init__(self, model, n_slots, max_len):
         self.model = model
         self.cfg = model.config
@@ -40,8 +39,8 @@ class Engine:
 
         #pairs; the counter isn't a storable state here
         self.kv_buffers = [
-            (torch.empty(n_slots, self.cfg.n_kv_head, max_len, head_size, device=w.device, dtype=w.dtype),
-            torch.empty(n_slots, self.cfg.n_kv_head, max_len, head_size, device=w.device, dtype=w.dtype))
+            (torch.zeros(n_slots, self.cfg.n_kv_head, max_len, head_size, device=w.device, dtype=w.dtype), #zeros instead of empty for cuda graphing since full tensor enters attention
+            torch.zeros(n_slots, self.cfg.n_kv_head, max_len, head_size, device=w.device, dtype=w.dtype))
             for _ in range(self.cfg.n_layer)
         ]
 
@@ -49,6 +48,17 @@ class Engine:
         self.next_id = torch.full((n_slots, 1), PAD_TOKEN, dtype=torch.long, device=w.device) #hold one token each slot will feed the model next
 
         self.step_events = [] #for processed logits to be appended and returned by step() for streaming
+
+        #for CUDA graphing
+        self.frontier_t = torch.zeros(1, dtype=torch.long, device = w.device)
+        self.graph = None
+
+
+    def _decode_forward(self):
+        step_cache = [(k, v, self.frontier_t) for k, v, in self.kv_buffers]
+        #full mask no slice
+        logits, _ = self.model(self.next_id, kv_past = step_cache, attn_mask = self.mask)
+        return logits
 
     def submit(self, request) -> None:
         self.waiting.append(request)
@@ -102,11 +112,29 @@ class Engine:
                 self.mask[slot, self.frontier] = 1
 
         # single batch decode call
-        step_cache = [(k,v,self.frontier) for (k, v) in self.kv_buffers] #all rows, counter = frontier
-        logits, _ = self.model(self.next_id, kv_past=step_cache, attn_mask=self.mask[:, :self.frontier + 1])  #(n_slots, 1)
+        #step_cache = [(k,v,self.frontier) for (k, v) in self.kv_buffers] #all rows, counter = frontier
+        #logits, _ = self.model(self.next_id, kv_past=step_cache, attn_mask=self.mask[:, :self.frontier + 1])  #(n_slots, 1)
+        
+        #single batch decode call static path for cuda graphing
+        self.frontier_t.fill_(self.frontier) #the frontier the captured forward will read
+
+        if self.graph is None and self.frontier_t.is_cuda: #initialize graph
+            self._decode_forward()  #warmup: triton compiles, cuBLAS initializes, pytorch cache memory gets allocated -> one time work that isnt a kernel / not capturable
+            torch.cuda.synchronize()
+            self.graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(self.graph):
+                self.static_logits = self._decode_forward()  #recorded, not run
+            self.graph.replay() #run it once for this step
+            logits = self.static_logits #(n_slots, 1) -> logits, full mask 
+        elif self.graph is not None: #graph is initialized
+            self.graph.replay(); logits = self.static_logits
+        else:
+            logits = self._decode_forward() 
+        
         for slot, request in enumerate(self.running):
             if request is not None and not request.done:
                 self._intake(slot, logits[slot:slot+1], request)
+
         self.frontier += 1
         return self.step_events
         
