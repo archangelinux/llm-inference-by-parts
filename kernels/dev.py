@@ -33,11 +33,43 @@ def run_tests():
     subprocess.run(["python", "tests/test_quant.py"], check=True, cwd="/root", env=env)
 
 
+@app.function(gpu="A10G", image=image, timeout=1800)
+def run_engine_tests():
+    #the continuous-batching gates on cuda, where Engine.step captures the decode forward
+    #as a cuda graph: gpt-2 scheduler test (fp32, eager solo vs graphed engine), qwen engine
+    #test, and the quantized-kernel path through the engine (fp16)
+    import os
+    import subprocess
+    subprocess.run(["python", "tests/test_scheduler.py"], check=True, cwd="/root")
+    subprocess.run(["python", "-c", "import tests.test_qwen as t; t.test_engine()"], check=True, cwd="/root")
+    subprocess.run(["python", "-c", """
+import torch
+from engine.config import DEVICE
+from engine.load import load_model
+from engine.quant import quantize_model
+from engine.scheduler import Engine, Request
+model, tok = load_model()
+quantize_model(model)
+ids = [tok(p, return_tensors='pt').input_ids.to(DEVICE) for p in ['Hello', 'def fibonacci(n):', 'The meaning of life is']]
+e = Engine(model=model, n_slots=2, max_len=128)
+reqs = [Request(prompt_ids=i, max_new_tokens=20) for i in ids]
+for r in reqs: e.submit(r)
+e.run()
+assert e.graph is not None, 'graph was not captured'
+for r, i in zip(reqs, ids):
+    solo = model.generate(i, max_new_tokens=20)[0, i.shape[1]:].tolist()
+    assert r.output_ids == solo, tok.decode(r.output_ids)
+print('int8-kernel engine: graph captured, all match solo')
+"""], check=True, cwd="/root", env={**os.environ, "DTYPE": "fp16"})
+
+
 @app.local_entrypoint()
 def main(name: str = "vector_add"):
     #modal run kernels/dev.py --name matmul      -> runs kernels/matmul.py's main()
     #modal run kernels/dev.py --name tests       -> runs tests/test_quant.py (kernel path live)
     if name == "tests":
         run_tests.remote()
+    elif name == "engine_tests":
+        run_engine_tests.remote()
     else:
         run.remote(name)

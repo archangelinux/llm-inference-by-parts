@@ -23,7 +23,7 @@ class Request:
 
 
 class Engine:
-    def __init__(self, model, n_slots, max_len):
+    def __init__(self, model, n_slots, max_len, use_graph=True): #use_graph=False forces the eager decode path on cuda (for the bench)
         self.model = model
         self.cfg = model.config
         self.n_slots = n_slots
@@ -52,6 +52,7 @@ class Engine:
         #for CUDA graphing
         self.frontier_t = torch.zeros(1, dtype=torch.long, device = w.device)
         self.graph = None
+        self.use_graph = use_graph
 
 
     def _decode_forward(self):
@@ -118,7 +119,7 @@ class Engine:
         #single batch decode call static path for cuda graphing
         self.frontier_t.fill_(self.frontier) #the frontier the captured forward will read
 
-        if self.graph is None and self.frontier_t.is_cuda: #initialize graph
+        if self.graph is None and self.frontier_t.is_cuda and self.use_graph: #initialize graph
             self._decode_forward()  #warmup: triton compiles, cuBLAS initializes, pytorch cache memory gets allocated -> one time work that isnt a kernel / not capturable
             torch.cuda.synchronize()
             self.graph = torch.cuda.CUDAGraph()
