@@ -1,10 +1,24 @@
+#writes the HF reference fixtures the test files check against:
+#tests/fixtures/<name>/fixture_logits_<i>.pt (one forward pass) and
+#fixture_generations.json (greedy 50-token continuations)
+
+# usage: python tests/make_fixtures.py                     -> tests/fixtures/gpt2/
+#        python tests/make_fixtures.py Qwen/Qwen2.5-0.5B   -> tests/fixtures/qwen2.5-0.5b/
 import json
+import sys
+from pathlib import Path
+
 import torch
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
 from engine.config import DEVICE
 
-tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-model = GPT2LMHeadModel.from_pretrained("gpt2").eval().to(DEVICE)
+MODEL = sys.argv[1] if len(sys.argv) > 1 else "gpt2"
+OUT = Path(__file__).parent / "fixtures" / MODEL.split("/")[-1].lower()
+OUT.mkdir(parents=True, exist_ok=True)
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL)
+model = AutoModelForCausalLM.from_pretrained(MODEL).eval().to(DEVICE)
 
 prompts = [
     "Hello",
@@ -24,16 +38,16 @@ with torch.inference_mode():
         enc = tokenizer(p, return_tensors="pt")
         ids = enc.input_ids.to(DEVICE)
         logits = model(ids).logits
-        torch.save(logits.cpu(), f"tests/fixture_logits_{i}.pt") # test forward pass in isolation
+        torch.save(logits.cpu(), OUT / f"fixture_logits_{i}.pt") # test forward pass in isolation
         out = model.generate( #to test against generation loop
             ids,
-            attention_mask=enc.attention_mask.to(DEVICE), #no padding 
+            attention_mask=enc.attention_mask.to(DEVICE), #no padding
             max_new_tokens=50,
             do_sample=False, #argmax every step
         )
         generations[p] = tokenizer.decode(out[0])
         print(f"[{i}/{len(prompts)}] ok: {p[:30]!r}")
 
-with open("tests/fixture_generations.json", "w") as f:
+with open(OUT / "fixture_generations.json", "w") as f:
     json.dump(generations, f, indent=2)
-print(f"[device: {DEVICE}] fixtures written")
+print(f"[device: {DEVICE}] fixtures written to {OUT}")
