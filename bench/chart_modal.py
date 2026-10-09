@@ -12,8 +12,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 HERE = Path(__file__).parent
-sweep = json.loads((HERE / "modal_results.json").read_text())["batched"]
-load = json.loads((HERE / "modal_load_results.json").read_text())
+DATA, CHARTS = HERE / "data", HERE / "charts"
+sweep = json.loads((DATA / "modal_results.json").read_text())["batched"]
+load = json.loads((DATA / "modal_load_results.json").read_text())
 
 VIOLET, GREEN, INK, MUTED, GRID, SURFACE = "#2e8f95", "#c4473a", "#1a1a1a", "#8b8a85", "#e4e3dd", "#fdfdfc"  #batch sweep teal, serving red
 
@@ -61,6 +62,6 @@ fig.suptitle("GPT-2 on the A10G: batching and serving", color=INK, fontsize=13, 
 fig.text(0.02, 0.885, "fp32, greedy. Left: median of 5 runs. Right: 3 waves of 25-token requests over loopback HTTP.",
          color=MUTED, fontsize=9.5)
 fig.tight_layout(rect=(0, 0, 1, 0.86))
-out = HERE / "modal.png"
+out = CHARTS / "modal.png"
 fig.savefig(out, facecolor=SURFACE)
 print(f"wrote {out}")

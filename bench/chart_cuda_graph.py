@@ -11,7 +11,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 HERE = Path(__file__).parent
-runs = json.loads((HERE / "modal_graph_results.json").read_text())["runs"]
+DATA, CHARTS = HERE / "data", HERE / "charts"
+runs = json.loads((DATA / "modal_graph_results.json").read_text())["runs"]
 OLIVE, VIOLET, INK, MUTED, GRID, SURFACE = "#c4473a", "#2e8f95", "#1a1a1a", "#8b8a85", "#e4e3dd", "#fdfdfc"  #eager red, graphed teal
 VARIANTS = ["fp32", "fp16", "int8-kernel"]
 
@@ -41,6 +42,6 @@ fig.suptitle("GPT-2 and Qwen3 on the A10G: time per decode step, eager vs CUDA g
 fig.text(0.02, 0.885, "50 tokens, median of 5 runs. The graph replays the ~200 (GPT-2) or ~1,000 (Qwen3) kernel launches of a step as one.",
          color=MUTED, fontsize=9.5)
 fig.tight_layout(rect=(0, 0, 1, 0.86))
-out = HERE / "cuda_graph.png"
+out = CHARTS / "cuda_graph.png"
 fig.savefig(out, facecolor=SURFACE)
 print(f"wrote {out}")

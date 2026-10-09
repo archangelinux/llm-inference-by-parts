@@ -26,7 +26,7 @@ N_SLOTS = 3
 N_NEW = 50
 N_RUNS = 3
 
-RESULTS_FILE = Path(__file__).parent / f"continuous_results{RUN_TAG}.jsonl"
+RESULTS_FILE = Path(__file__).parent / "data" / f"continuous_results{RUN_TAG}.jsonl"
 
 model, tok = load_model()
 EOS = tok(".").input_ids[0]  # "." -- greedy rarely emits the real eos in 50 tokens; borrow a frequent token

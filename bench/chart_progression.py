@@ -20,9 +20,10 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 HERE = Path(__file__).parent
+DATA, CHARTS = HERE / "data", HERE / "charts"
 
 def median_of(path, **match):
-    for line in (HERE / path).read_text().splitlines():
+    for line in (DATA / path).read_text().splitlines():
         r = json.loads(line)
         if all(r.get(k) == v for k, v in match.items()):
             return statistics.median(r["tok_per_sec"])
@@ -63,7 +64,7 @@ ax.text(0, 1.115, "Greedy decoding, 50 new tokens, median of 5 runs, MPS backend
 ax.text(0, 1.055, "Naive and cached: one sequence, 512-token context. Batched: 16 prompts, total tok/s.",
         transform=ax.transAxes, color=MUTED, fontsize=9.5)
 fig.tight_layout()
-out = HERE / "progression.png"
+out = CHARTS / "progression.png"
 fig.savefig(out, facecolor=SURFACE)
 print(f"wrote {out}")
 for s, v in zip(stages, values):

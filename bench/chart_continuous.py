@@ -14,7 +14,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 HERE = Path(__file__).parent
-rows = [json.loads(l) for l in (HERE / "continuous_results.jsonl").read_text().splitlines()]
+DATA, CHARTS = HERE / "data", HERE / "charts"
+rows = [json.loads(l) for l in (DATA / "continuous_results.jsonl").read_text().splitlines()]
 rows.sort(key=lambda r: (r["static_s"], r["continuous_s"]))
 
 # one measure, two states -> one hue, two shades (light=before/static, dark=after/continuous)
@@ -47,6 +48,6 @@ ax.set_title("GPT-2 on the M1: completion time per request, static vs continuous
 ax.text(0, 1.05, "8 requests on 3 slots, finishing at 2 to 50 tokens. Each line is one request under both schedulers.",
         transform=ax.transAxes, color=MUTED, fontsize=9.5)
 fig.tight_layout()
-out = HERE / "continuous.png"
+out = CHARTS / "continuous.png"
 fig.savefig(out, facecolor=SURFACE)
 print(f"wrote {out}")

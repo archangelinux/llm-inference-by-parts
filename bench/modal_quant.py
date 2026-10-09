@@ -4,7 +4,7 @@
     #plus a per-op microbench of one c_attn-shaped matmul, where the kernel's
     #own bandwidth shows without the ~5ms/step python dispatch overhead
 
-# usage: modal run bench/modal_quant.py; writes bench/modal_quant_results.json
+# usage: modal run bench/modal_quant.py; writes bench/data/modal_quant_results.json
 import json
 import os
 from pathlib import Path
@@ -166,6 +166,6 @@ def bench():
 def main():
     results = bench.remote()
     m = os.environ.get("MODEL", "gpt2")
-    out = Path(__file__).parent / f"modal_quant_results{'' if m == 'gpt2' else '.' + m}.json"
+    out = Path(__file__).parent / "data" / f"modal_quant_results{'' if m == 'gpt2' else '.' + m}.json"
     out.write_text(json.dumps(results, indent=2))
     print(f"wrote {out}")

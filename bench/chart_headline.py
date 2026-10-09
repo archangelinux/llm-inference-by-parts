@@ -14,7 +14,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 HERE = Path(__file__).parent
-load = lambda name: json.loads((HERE / name).read_text())
+DATA, CHARTS = HERE / "data", HERE / "charts"
+load = lambda name: json.loads((DATA / name).read_text())
 res = {"gpt2": load("modal_results.json"), "qwen": load("modal_results.qwen.json")}
 quant = {"gpt2": load("modal_quant_results.json"), "qwen": load("modal_quant_results.qwen.json")}
 graph = load("modal_graph_results.json")["runs"]
@@ -79,6 +80,6 @@ fig.suptitle("GPT-2 and Qwen3 on the same engine, A10G", color=INK, fontsize=13,
 fig.text(0.02, 0.935, "All bars: greedy (argmax) decoding, median of 5 runs. Panel numbers are the stages in the table above.",
          color=MUTED, fontsize=9.5)
 fig.tight_layout(rect=(0, 0, 1, 0.92))
-out = HERE / "headline.png"
+out = CHARTS / "headline.png"
 fig.savefig(out, facecolor=SURFACE)
 print(f"wrote {out}")

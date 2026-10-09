@@ -1,4 +1,5 @@
 # llm-inference-by-parts
+(For a guide on my process & learnings, see [GUIDE.md](GUIDE.md))
 
 Inference engine built from scratch in PyTorch that serves GPT-2 and Qwen3. The stages of implementation are as follows, with each stage verified against its previous and benchmarked:
 
@@ -13,7 +14,7 @@ Inference engine built from scratch in PyTorch that serves GPT-2 and Qwen3. The 
 | 7. CUDA-graph decode | decode forward captured once, replayed per step | 3-7x per step; int8-kernel becomes the fastest variant; 3-5x off the bandwidth floor remains |
 
 
-![the engine by stage: throughput, the kernel per op, and CUDA-graph decode, GPT-2 and Qwen3 on an A10G](bench/headline.png)
+![the engine by stage: throughput, the kernel per op, and CUDA-graph decode, GPT-2 and Qwen3 on an A10G](bench/charts/headline.png)
 
 The engine, measured (`bench/chart_headline.py`):
 
@@ -30,7 +31,7 @@ The engine, measured (`bench/chart_headline.py`):
   the parameter ratio at every stage.
 - The int8 path is a hand-written Triton kernel that dequantizes inside the
   matmul: per op it is 1.5-1.8x faster than cuBLAS fp16 at ~50% of A10G
-  bandwidth, for +0.03% (GPT-2) / +0.75% (Qwen3) perplexity (`bench/quant.png`).
+  bandwidth, for +0.03% (GPT-2) / +0.75% (Qwen3) perplexity (`bench/charts/quant.png`).
 - In eager mode, fp16 and the int8 kernel don't speed up decode at b=1,
   because the step time is dominated by the cost of launching ~200 kernels
   from Python and not by the bytes read. The int8 kernel is even the slowest
@@ -129,7 +130,7 @@ A10G sweep below doesn't have this.
 continuous batching, a finished request's slot goes to the next request
 immediately.
 
-![continuous vs static completion times](bench/continuous.png)
+![continuous vs static completion times](bench/charts/continuous.png)
 
 Makespan (time until the last request finishes) is roughly unchanged (6.5s vs 7.4s here — the last 50-token request was admitted later under continuous), since the tokens generated are the same (scheduling only changes who waits). In the chart, the three requests that were stuck behind a 50-token generation decrease from ~6s to ~2.5s.
 
@@ -147,7 +148,7 @@ gain on top of the fairness gain, and it's the main reason production engines
 
 **Serving under load** (`bench/load.py`, 4 slots):
 
-![load results](bench/load_results.png)
+![load results](bench/charts/load_results.png)
 
 Throughput scales until the slots fill (~c=8). Every client added after that just lengthens the queue, which is why the slowest requests (p95 latency) get dramatically worse while throughput actually drops slightly.
 
@@ -168,7 +169,7 @@ Same engine and protocol on an A10G (`bench/modal_bench.py` ->
 | total tok/s | 159 | 1,210 | 2,414 | 4,909 | 8,789 | 16,428 |
 | per-row tok/s | 159 | 151 | 151 | 153 | 137 | 128 |
 
-![A10G results](bench/modal.png)
+![A10G results](bench/charts/modal.png)
 
 Per-row (total / batch size) throughput stays flat and declines gently (each sequence keeps nearly its full speed no matter how many share the batch), which is the expected memory-bound effect, without the cliff seen with MPS.
 
@@ -302,7 +303,7 @@ int8 costs Qwen3 +0.75% perplexity, 25x more than GPT-2's +0.03%. This is still 
 
 `kernels/dequant_matmul.py` is `QuantLinear.forward` written as one Triton kernel. Each program owns a tile of the output, walks through K in chunks, loads int8 chunks of the weights, and applies the per-row scales after the accumulator loop. The fp16 weights only ever exist in registers, never in memory. This is what the slow path can't do. `tests/test_quant.py` checks the kernel against the slow path on all four layer shapes (max error ~0.03), and on CUDA the whole fixture suite runs through it. The block config (BLOCK_N=32, BLOCK_K=256, 4 warps) was picked by timing a set of configs on the A10G (`kernels/sweep_graph.py`). 2304/32 = 72 programs, one per SM.
 
-![quant results](bench/quant.png)
+![quant results](bench/charts/quant.png)
 
 Time for one matmul at the decode shape (M=1, c_attn 2304x768), measured by CUDA-graph replay (`bench/modal_quant.py` -> `modal_quant_results.json`):
 
@@ -376,7 +377,7 @@ Every decode step runs the same kernels on the same shapes; only the data change
 | Qwen3 fp16 | 34.08 -> 7.36 ms (4.6x) | 37.31 -> 10.42 ms (3.6x) |
 | Qwen3 int8-kernel | 42.81 -> 6.65 ms (6.4x) | 44.59 -> 10.00 ms (4.5x) |
 
-![CUDA-graph decode: eager vs captured, per model and precision](bench/cuda_graph.png)
+![CUDA-graph decode: eager vs captured, per model and precision](bench/charts/cuda_graph.png)
 
 After CUDA graphing, decode time is ordered by the number of bytes read per step. On Qwen3, int8-kernel takes 6.65 ms, fp16 takes 7.36 ms and fp32 takes 8.86 ms. This is the first configuration where the int8 kernel is the fastest option end to end. Qwen3 fp16 goes from 29 to 136 tok/s at b=1. On GPT-2, int8 and fp16 are equal (1.30 vs 1.29 ms). GPT-2 runs ~200 kernels per step at a few microseconds each, and at that size the step time is dominated by the fixed cost of running each kernel rather than the bytes it reads. Compared to the bandwidth floor, GPT-2 fp16 is 3.1x slower than the minimum (13x before graphing) and Qwen3 int8-kernel is 5.3x slower. The remaining overhead is the per-kernel cost, which can be reduced by fusing kernels into fewer, bigger ones.
 
@@ -412,7 +413,10 @@ server/engine_loop.py  async bridge: inbox -> engine loop task -> per-request ou
 server/app.py          FastAPI: POST /generate (SSE; model, mode, do_sample/temperature/top_k), browser demo page at /
 engine/sampling.py     next-token rule shared by generate_batch and the engine: greedy default, opt-in sampling
 tests/                 the correctness chain (pytest tests/); fixtures/<model>/ from make_fixtures.py
-bench/                 throughput, latency, and load benchmarks + results
+bench/                 throughput, latency, and load benchmarks; chart_*.py render data/ -> charts/
+bench/data/            benchmark results (JSON/JSONL)
+bench/charts/          rendered charts (PNG)
+GUIDE.md               the writeup: each stage built, tested, and benchmarked
 ```
 
 ## Scripts

@@ -30,7 +30,7 @@ N_RUNS = 5 #median of 5, clean protocol
 COOLDOWN_S = 60 #pause between mechanisms so a heavy one doesn't heat/throttle the GPU for the next
 
 #fp32 keeps the original filename (the README baseline); other dtypes get their own file
-RESULTS_FILE = Path(__file__).parent / f"results{RUN_TAG}.jsonl"
+RESULTS_FILE = Path(__file__).parent / "data" / f"results{RUN_TAG}.jsonl"
 
 model, _ = load_model() #load the model once at module level, not timed; eval() is no op without batchnorm and dropout etc. since not training
 

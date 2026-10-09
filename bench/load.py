@@ -29,7 +29,7 @@ LEVELS = [1, 4, 8, 16]
 WAVES = 3
 N_NEW = 25
 
-RESULTS_FILE = Path(__file__).parent / "load_results.json"
+RESULTS_FILE = Path(__file__).parent / "data" / "load_results.json"
 
 PROMPTS = [
     "Hello",

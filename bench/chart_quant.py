@@ -12,7 +12,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 HERE = Path(__file__).parent
-r = json.loads((HERE / "modal_quant_results.json").read_text())
+DATA, CHARTS = HERE / "data", HERE / "charts"
+r = json.loads((DATA / "modal_quant_results.json").read_text())
 
 GREEN, OLIVE, VIOLET, RED = "#c4473a", "#8b5e3c", "#2e8f95", "#a9d0d3"  #cuBLAS fp16 red, int8 slow path brown, int8 kernel teal; right panel: shades of teal, darker = fewer bytes read
 INK, MUTED, GRID, SURFACE = "#1a1a1a", "#8b8a85", "#e4e3dd", "#fdfdfc"
@@ -58,6 +59,6 @@ fig.suptitle("GPT-2 on the A10G: int8 and the fused Triton kernel", color=INK, f
 fig.text(0.02, 0.885, "Left: one matmul timed by CUDA-graph replay over 8 weight copies. Right: full decode in eager PyTorch, where each launch costs ~20us.",
          color=MUTED, fontsize=9.5)
 fig.tight_layout(rect=(0, 0, 1, 0.86))
-out = HERE / "quant.png"
+out = CHARTS / "quant.png"
 fig.savefig(out, facecolor=SURFACE)
 print(f"wrote {out}")

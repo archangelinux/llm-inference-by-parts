@@ -3,7 +3,7 @@
     #eager = the decode forward launched op by op from python (~200-1000 launches/token)
     #graphed = the same forward captured once and replayed per step
 
-# usage: modal run bench/modal_graph.py; writes bench/modal_graph_results.json
+# usage: modal run bench/modal_graph.py; writes bench/data/modal_graph_results.json
 import json
 from pathlib import Path
 
@@ -83,6 +83,6 @@ def bench():
 @app.local_entrypoint()
 def main():
     results = bench.remote()
-    out = Path(__file__).parent / "modal_graph_results.json"
+    out = Path(__file__).parent / "data" / "modal_graph_results.json"
     out.write_text(json.dumps(results, indent=2))
     print(f"wrote {out}")

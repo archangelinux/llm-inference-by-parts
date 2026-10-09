@@ -11,7 +11,7 @@
                     #(kernel launches, Python dispatch) sits on top of physics.
 
 
-# usage: modal run bench/modal_bench.py; writes bench/modal_results.json locally
+# usage: modal run bench/modal_bench.py; writes bench/data/modal_results.json locally
 import json
 import os
 from pathlib import Path
@@ -154,6 +154,6 @@ def main():
     #fp32 keeps the original filename (the README baseline); other dtypes get their own file
     m = os.environ.get("MODEL", "gpt2")
     suffix = ("" if m == "gpt2" else f".{m}") + (".float16" if os.environ.get("DTYPE") == "fp16" else "")
-    out = Path(__file__).parent / f"modal_results{suffix}.json"
+    out = Path(__file__).parent / "data" / f"modal_results{suffix}.json"
     out.write_text(json.dumps(results, indent=2))
     print(f"wrote {out}")

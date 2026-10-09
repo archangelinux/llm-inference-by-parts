@@ -1,4 +1,4 @@
-#render bench/load_results.json -> load_results.png for the README
+#render bench/data/load_results.json -> load_results.png for the README
 
 """Two panels, one story: as concurrency rises past the slot count,
 latency (esp. the p95 tail) explodes while req/s stalls -- saturation.
@@ -12,7 +12,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 HERE = Path(__file__).parent
-rows = json.loads((HERE / "load_results.json").read_text())
+DATA, CHARTS = HERE / "data", HERE / "charts"
+rows = json.loads((DATA / "load_results.json").read_text())
 
 x = range(len(rows))
 labels = [str(r["concurrency"]) for r in rows]
@@ -64,6 +65,6 @@ fig.suptitle("GPT-2 on the M1: serving under load, 4 slots",
 fig.text(0.02, 0.885, "End to end over HTTP and SSE. 25 tokens per request, 3 waves per concurrency level, medians.",
          color=MUTED, fontsize=9.5)
 fig.tight_layout(rect=(0, 0, 1, 0.86))
-out = HERE / "load_results.png"
+out = CHARTS / "load_results.png"
 fig.savefig(out, facecolor=SURFACE)
 print(f"wrote {out}")

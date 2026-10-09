@@ -25,7 +25,7 @@ N_NEW = 50
 N_RUNS = 5 #median matters more than mean on a fanless machine?
 
 #fp32 keeps the original filename (the README baseline); other dtypes get their own file
-RESULTS_FILE = Path(__file__).parent / f"batch_results{RUN_TAG}.jsonl"
+RESULTS_FILE = Path(__file__).parent / "data" / f"batch_results{RUN_TAG}.jsonl"
 
 model, _ = load_model()
 

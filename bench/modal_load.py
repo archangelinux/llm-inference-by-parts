@@ -6,7 +6,7 @@ tok/s, TTFT, p50/p95. Loopback = no real network between client and server, so
 this measures the serving stack + scheduler utilization on fast hardware, not
 internet latency."""
 
-#usage: modal run bench/modal_load.py  writes bench/modal_load_results.json locally
+#usage: modal run bench/modal_load.py  writes bench/data/modal_load_results.json locally
 
 
 import json
@@ -110,6 +110,6 @@ def load_bench():
 @app.local_entrypoint()
 def main():
     rows = load_bench.remote()
-    out = Path(__file__).parent / "modal_load_results.json"
+    out = Path(__file__).parent / "data" / "modal_load_results.json"
     out.write_text(json.dumps(rows, indent=2))
     print(f"wrote {out}")
