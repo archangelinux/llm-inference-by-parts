@@ -158,16 +158,19 @@ PAGE = """<!doctype html>
   button { font: inherit; background: #1a1a1a; color: #fdfdfc; border: 1px solid #1a1a1a; padding: 5px 18px; cursor: pointer; }
   button:hover { background: #3d3c39; }
   button:disabled { background: #b8b6ae; border-color: #b8b6ae; cursor: default; }
+  button.ghost { background: transparent; color: #1a1a1a; border-color: #e4e3dd; }
+  button.ghost:hover { border-color: #b8b6ae; background: transparent; }
   label.opt { color: #8b8a85; font-size: 12px; display: flex; align-items: center; gap: 6px; }
   #prompts { display: grid; gap: 6px; margin-bottom: 28px; }
   h2 { font-size: 12px; font-weight: 600; color: #8b8a85; text-transform: uppercase; letter-spacing: 0.06em;
        margin: 28px 0 8px; border-bottom: 1px solid #e4e3dd; padding-bottom: 6px; }
-  #mechs, #stream .mech { border: 1px solid #e4e3dd; }
+  #mechs, #stream .box { border: 1px solid #e4e3dd; }
   .mech { display: grid; grid-template-columns: 300px 1fr 150px; gap: 0; align-items: start; }
   .mech + .mech { border-top: 1px solid #e4e3dd; }
   .mech > div { padding: 12px 14px; }
   .mech > div + div { border-left: 1px solid #e4e3dd; }
-  #stream .mech { margin-top: 10px; }
+  #stream .box { margin-top: 10px; }
+  #stream .cards { padding: 0 14px 14px; }
   .mech .name { font-weight: 600; }
   .mech .desc { color: #8b8a85; font-size: 12px; }
   .mech .status { font-size: 12px; text-align: right; color: #3d3c39; white-space: pre-line; }
@@ -180,18 +183,22 @@ PAGE = """<!doctype html>
   .rows b.on { background: var(--c); }
   .cap { color: #8b8a85; font-size: 11px; margin-top: 4px; min-height: 15px; }
   .card { margin-top: 10px; border: 1px solid #e4e3dd; }
+  .card:first-child { margin-top: 0; }
   .card .head { display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px; background: #f6f5f1; font-size: 12px; }
   .card .head .n { color: var(--c); font-weight: 600; margin-right: 8px; }
   .card .head .stat { color: #8b8a85; white-space: nowrap; }
+  .card .head .p { overflow-wrap: anywhere; }
   .card .out { white-space: pre-wrap; color: #3d3c39; padding: 8px 10px; min-height: 40px; }
 </style>
 <body>
 <h1>llm-inference</h1>
 <div class="controls">
-  <span class="muted small">model</span> <select id="model" class="sel">__OPTIONS__</select>
+  <span class="muted small">model</span> <select id="model" class="sel" onchange="memo()">__OPTIONS__</select>
   <label class="opt"><input type="checkbox" id="sample"> sample (temperature 0.9, top-k 50)</label>
   <button id="run" onclick="race()">run</button>
+  <button id="reset" class="ghost" onclick="reset()">reset</button>
 </div>
+<div id="memo" class="muted small" style="display:none; margin-bottom: 14px"></div>
 <div id="prompts">
   <input class="pin" value="The meaning of life is" placeholder="prompt 1">
   <input class="pin" value="Once upon a time" placeholder="prompt 2">
@@ -217,13 +224,43 @@ const sampling = () => document.getElementById('sample').checked ? {do_sample: t
 const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
 const $ = id => document.getElementById(id);
 
+//shown under the controls when a slower model is selected
+const MEMOS = {
+  qwen: "qwen3 0.6b is ~5x bigger than gpt-2 (0.6b vs 124m parameters) and has 28 layers instead of 12. every step reads ~5x more weights and launches more gpu kernels, so each mechanism takes several times longer, naive most of all.",
+};
+function memo() {
+  const text = MEMOS[model()];
+  $('memo').textContent = text || '';
+  $('memo').style.display = text ? '' : 'none';
+}
+window.addEventListener('DOMContentLoaded', memo); //in case qwen is the default
+
+let ctrl = null; //aborts the current race's requests on reset
+
+//POST /generate for the current race; reset() aborts it
+const post = body => fetch('/generate', {method: 'POST', headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify(body), signal: ctrl.signal});
+
+//clear the results but keep the prompts and settings
+function reset() {
+  if (ctrl) ctrl.abort();
+  ctrl = null;
+  $('results').style.display = 'none';
+  $('mechs').innerHTML = '';
+  $('stream').innerHTML = '';
+  $('run').disabled = false;
+}
+
 function bars(n) { return Array.from({length: n}, () => '<i></i>').join(''); }
 
 async function race() {
   const prompts = [...document.querySelectorAll('input.pin')].map(el => el.value.trim()).filter(Boolean);
   if (!prompts.length || $('run').disabled) return;
   $('run').disabled = true; //one race at a time: a second click mid-race would write into the same rows
-  try { await raceBody(prompts); } finally { $('run').disabled = false; }
+  const mine = ctrl = new AbortController();
+  try { await raceBody(prompts); }
+  catch (e) { if (e.name !== 'AbortError') throw e; } //reset() aborted this race
+  finally { if (ctrl === mine) $('run').disabled = false; } //a reset + new race owns the button now
 }
 
 async function raceBody(prompts) {
@@ -240,11 +277,11 @@ async function raceBody(prompts) {
       <div class="status" id="status-${m}">waiting</div>
     </div>`).join('');
 
-  //continuous: the fourth mechanism row, then one live card per prompt
-  $('stream').innerHTML = `<div class="mech">
+  //continuous: the fourth mechanism row, with one full-width live card per prompt below it, in the same box
+  $('stream').innerHTML = `<div class="box"><div class="mech">
       <div><div class="name" style="color:#7a72b5">continuous</div><div class="desc">continuous batching: all prompts in one shared batch, each streamed live as its slot is scheduled</div></div>
-      <div></div><div class="status" id="sum-continuous">waiting</div></div>` +
-    prompts.map((p, i) => `<div class="card"><div class="head"><span><span class="n">${i + 1}</span>${esc(p.slice(0, 70))}</span><span class="stat" id="s-c${i}"></span></div><div id="o-c${i}" class="out"></div></div>`).join('');
+      <div></div><div class="status" id="sum-continuous">waiting</div></div>
+      <div class="cards">${prompts.map((p, i) => `<div class="card"><div class="head"><span class="p"><span class="n">${i + 1}</span>${esc(p)}</span><span class="stat" id="s-c${i}"></span></div><div id="o-c${i}" class="out"></div></div>`).join('')}</div></div>`;
   const sampled = !!sampling().do_sample; //read once, so a mid-run toggle can't change the verdict
 
   const results = {};
@@ -282,8 +319,7 @@ async function runSequential(mode, prompts) {
   const texts = [];
   const t0 = performance.now();
   for (const [k, prompt] of prompts.entries()) {
-    const resp = await fetch('/generate', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({prompt, max_new_tokens: N_NEW, mode, model: model(), ...sampling()})});
+    const resp = await post({prompt, max_new_tokens: N_NEW, mode, model: model(), ...sampling()});
     //the strip shows the current prompt's steps; reset it per prompt
     [...$('strip-' + mode).children].forEach(b => { b.className = ''; b.style.height = '2px'; });
     const ev = await readSSE(resp, ev => { if (ev.step) drawStep(mode, ev, (ev.ctx - ev.step) + N_NEW); });
@@ -296,8 +332,7 @@ async function runSequential(mode, prompts) {
 
 async function runStatic(prompts) {
   const t0 = performance.now();
-  const resp = await fetch('/generate', {method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({prompt: prompts[0], prompts, max_new_tokens: N_NEW, mode: 'static', model: model(), ...sampling()})});
+  const resp = await post({prompt: prompts[0], prompts, max_new_tokens: N_NEW, mode: 'static', model: model(), ...sampling()});
   const ev = await readSSE(resp, ev => { if (ev.step) drawStep('static', ev); });
   $('status-static').textContent = `all ${prompts.length} in ${((performance.now() - t0) / 1000).toFixed(2)}s`;
   return ev.texts;
@@ -308,8 +343,7 @@ async function runContinuous(prompt, i) {
   const t0 = performance.now();
   let ttft = null, text = '', n = 0;
   stat.textContent = '...';
-  const resp = await fetch('/generate', {method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({prompt, max_new_tokens: N_NEW, model: model(), ...sampling()})});
+  const resp = await post({prompt, max_new_tokens: N_NEW, model: model(), ...sampling()});
   await readSSE(resp, ev => {
     if (ttft === null) ttft = (performance.now() - t0) / 1000;
     text += ev.token; n++;
