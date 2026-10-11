@@ -23,7 +23,7 @@ app = modal.App("llm-inference-bench")
 #DTYPE=fp16 modal run ... -- the local env var is baked into the container env,
 #where engine/config.py reads it exactly like it does locally
 image = (modal.Image.debian_slim(python_version="3.12")
-         .pip_install("torch", "transformers")
+         .pip_install("torch", "transformers==4.56.2") #match local: transformers 5 loads checkpoints in bf16 by default
          .env({"DTYPE": os.environ.get("DTYPE", ""), "MODEL": os.environ.get("MODEL", "gpt2")})
          .add_local_dir("engine", remote_path="/root/engine"))
 

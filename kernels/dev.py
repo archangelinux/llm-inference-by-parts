@@ -10,7 +10,7 @@ app = modal.App("llm-inference-kernels")
 #pip line matches modal_bench.py so modal reuses that cached image build
 #no need to pip install triton: the linux/CUDA torch build already includes it (MPS torch doesn't)
 image = (modal.Image.debian_slim(python_version="3.12")
-         .pip_install("torch", "transformers")
+         .pip_install("torch", "transformers==4.56.2") #match local: transformers 5 loads checkpoints in bf16 by default
          .env({"MODEL": os.environ.get("MODEL", "gpt2")})
          .add_local_dir("engine", remote_path="/root/engine")
          .add_local_dir("kernels", remote_path="/root/kernels")

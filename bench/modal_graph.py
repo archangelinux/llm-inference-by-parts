@@ -11,7 +11,7 @@ import modal
 
 app = modal.App("llm-inference-graph-bench")
 image = (modal.Image.debian_slim(python_version="3.12")
-         .pip_install("torch", "transformers")
+         .pip_install("torch", "transformers==4.56.2") #match local: transformers 5 loads checkpoints in bf16 by default
          .add_local_dir("engine", remote_path="/root/engine")
          .add_local_dir("kernels", remote_path="/root/kernels"))
 
