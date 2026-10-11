@@ -45,9 +45,18 @@ class QwenConfig:
     bias: bool = False
 
     n_kv_head: int = 8 #GQA number - 16 q-heads share 8 k/v-heads, 2 qs per kv
-    head_dim: int = 128 # 1024/16 = 64, but heads are 128 wide; q projects to 16×128 = 2048, k/v to 8×128 = 1024, o_proj maps 2048 → 1024
+    head_dim: int = 128 # 1024/16 = 64, but heads are 128 wide; q projects to 16×128 = 2048, k/v to 8×128 = 1024, o_proj maps 2048 → n_embd (1024 in 0.6b, 2048 in 1.7b)
 
     intermediate_size: int = 3072 #MLP width (3x hidden, isntead of 4x hidden in gpt)
     rms_norm_eps: float = 1e-06
     rope_theta:float = 1000000.0 # base frequency, constant in angle formula
     #eos_token_id = 151643
+
+    hf_id: str = "Qwen/Qwen3-0.6B-Base" #which HF checkpoint these sizes describe
+
+
+#one config per checkpoint size; QwenConfig() alone is 0.6b
+QWEN_PRESETS = {
+    "0.6b": QwenConfig(),
+    "1.7b": QwenConfig(hf_id="Qwen/Qwen3-1.7B-Base", n_embd=2048, intermediate_size=6144),
+}

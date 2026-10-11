@@ -213,7 +213,7 @@ class Qwen(nn.Module):
     def from_pretrained(cls, config):
         model = cls(config)
         sd = model.state_dict()
-        model_hf = AutoModelForCausalLM.from_pretrained('Qwen/Qwen3-0.6B-Base')
+        model_hf = AutoModelForCausalLM.from_pretrained(config.hf_id)
         sd_hf = model_hf.state_dict()
         
         with torch.no_grad():
@@ -336,7 +336,7 @@ if __name__ == "__main__":
     x, _ = Qwen(cfg).to(DEVICE)(ids)
     print("qwen:", x.shape)
 
-    tok = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B-Base") 
+    tok = AutoTokenizer.from_pretrained(QwenConfig.hf_id)
     model = Qwen.from_pretrained(QwenConfig()).to(DEVICE, DTYPE).eval()
     ids = tok("The meaning of life is", return_tensors="pt").input_ids.to(DEVICE) #(b, t) = (1, 5); or t the sequence length is the number of subword tokens. b is batch size = number of input strings
     print(tok.decode(model.generate(ids, max_new_tokens=20)[0]))

@@ -4,7 +4,7 @@ from transformers import AutoTokenizer
 
 from engine.config import DEVICE, DTYPE, MODEL, GPTConfig, QwenConfig
 
-HF_ID = {"gpt2": "gpt2", "qwen": "Qwen/Qwen3-0.6B-Base"}
+HF_ID = {"gpt2": "gpt2", "qwen": QwenConfig.hf_id}
 LABELS = {"gpt2": "gpt-2 124m", "qwen": "qwen3 0.6b"}
 MODEL_LABEL = LABELS[MODEL]
 

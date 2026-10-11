@@ -1,25 +1,27 @@
-"""Our Qwen vs the HF reference fixtures (tests/fixtures/qwen3-0.6b-base/, from
-tests/make_fixtures.py Qwen/Qwen3-0.6B-Base). Same ladder as the GPT-2 tests:
+"""Our Qwen vs the HF reference fixtures (tests/fixtures/qwen3-<size>-base/, from
+tests/make_fixtures.py Qwen/Qwen3-<size>-Base). QWEN=0.6b (default) | 1.7b picks the
+size from engine/config.py QWEN_PRESETS. Same ladder as the GPT-2 tests:
 rope property (no weights needed) -> logits vs HF -> greedy identity -> batched == solo.
 Run with pytest or plain python."""
 import json
+import os
 from pathlib import Path
 
 import torch
 from transformers import AutoTokenizer
 
-from engine.config import DEVICE, DTYPE, QwenConfig
+from engine.config import DEVICE, DTYPE, QWEN_PRESETS
 from engine.qwen import Qwen, apply_rope
 from engine.scheduler import Engine, Request
 
 TESTS_DIR = Path(__file__).parent
-FIXTURES = TESTS_DIR / "fixtures" / "qwen3-0.6b-base"
+cfg = QWEN_PRESETS[os.environ.get("QWEN", "0.6b")]
+MODEL_ID = cfg.hf_id
+FIXTURES = TESTS_DIR / "fixtures" / MODEL_ID.split("/")[-1].lower() #same naming as make_fixtures.py
 with open(FIXTURES / "fixture_generations.json") as f:
     GENERATIONS = json.load(f)
 
-MODEL_ID = "Qwen/Qwen3-0.6B-Base"
 tok = AutoTokenizer.from_pretrained(MODEL_ID)
-cfg = QwenConfig()
 
 #same placement logic as test_logits: a few times above correct-code error, far
 #below broken-code error. qwen logits are smaller-magnitude than gpt-2's (~±30),
